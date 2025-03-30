@@ -692,7 +692,7 @@ def run_bot():
 
 def run_web_server():
     """Run the Flask web server."""
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 10000))
     logger.info(f"Starting web server on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 

@@ -8,6 +8,8 @@ services:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
         value: 8132711759:AAHUIrEfsDo0bID_4LKBr9x9qIYyUcPk3lQ
+      - key: PORT
+        value: 10000
     healthCheckPath: /health
     healthCheckTimeout: 180
     healthCheckInterval: 60
