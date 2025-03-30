@@ -581,12 +581,8 @@ def error_handler(update: Update, context: CallbackContext) -> None:
     update_last_response()  # Update last response time even on errors
     
     if isinstance(context.error, Conflict):
-        logger.warning("Conflict detected - another bot instance might be running")
-        if bot_instance:
-            try:
-                bot_instance.stop()
-            except Exception as e:
-                logger.error(f"Error stopping bot: {str(e)}")
+        logger.warning("Conflict detected - continuing operation...")
+        # Don't stop the bot on conflict, just continue
         time.sleep(5)
     elif isinstance(context.error, (TimedOut, NetworkError)):
         logger.warning("Network error occurred - will retry automatically")
@@ -668,7 +664,10 @@ def run_bot():
                         if updates:
                             logger.info(f"Received {len(updates)} updates")
                     except Exception as e:
-                        logger.warning(f"Error getting updates: {str(e)}")
+                        if "Conflict" in str(e):
+                            logger.warning("Conflict detected in update check, continuing...")
+                        else:
+                            logger.warning(f"Error getting updates: {str(e)}")
                     
                     time.sleep(30)
                 except Exception as e:
