@@ -2,12 +2,16 @@ import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+from telegram.error import Conflict, TimedOut, NetworkError
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
 import time
 from flask import Flask
 import threading
+import sys
+import fcntl
+import atexit
 
 # Load environment variables
 load_dotenv()
@@ -24,6 +28,43 @@ DROPMAIL_API = "https://dropmail.me/api/graphql/web-test"
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Global variables
+bot_instance = None
+lock_file = None
+
+def acquire_lock():
+    """Acquire a lock file to ensure only one instance runs."""
+    global lock_file
+    try:
+        lock_file = open('/tmp/bot.lock', 'w')
+        fcntl.lockf(lock_file, fcntl.F_EXLC)
+        return True
+    except IOError:
+        return False
+
+def release_lock():
+    """Release the lock file."""
+    global lock_file
+    if lock_file:
+        fcntl.lockf(lock_file, fcntl.F_UNLC)
+        lock_file.close()
+        try:
+            os.remove('/tmp/bot.lock')
+        except:
+            pass
+
+def cleanup():
+    """Cleanup function to be called on exit."""
+    release_lock()
+    if bot_instance:
+        try:
+            bot_instance.stop()
+        except:
+            pass
+
+# Register cleanup function
+atexit.register(cleanup)
 
 @app.route('/')
 def home():
@@ -373,58 +414,78 @@ def button_callback(update: Update, context: CallbackContext):
             logger.error(f"Error in button_callback: {str(e)}")
             callback_query.message.reply_text("❌ An error occurred while fetching emails.")
 
+def error_handler(update: Update, context: CallbackContext) -> None:
+    """Handle errors in the telegram bot."""
+    logger.error(f"Update {update} caused error: {context.error}")
+    
+    if isinstance(context.error, Conflict):
+        logger.warning("Conflict detected - another bot instance might be running")
+        # Stop the current instance and wait for restart
+        if bot_instance:
+            try:
+                bot_instance.stop()
+            except:
+                pass
+        time.sleep(5)
+    elif isinstance(context.error, (TimedOut, NetworkError)):
+        logger.warning("Network error occurred - will retry automatically")
+    else:
+        logger.error(f"Unexpected error: {context.error}")
+
 def run_bot():
     """Run the Telegram bot."""
+    global bot_instance
+    
     # Get the token from environment variable
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
         return
 
-    while True:  # Outer loop for continuous operation
-        try:
-            # Create the Updater and pass it your bot's token
-            updater = Updater(token, use_context=True)
+    # Try to acquire lock
+    if not acquire_lock():
+        logger.error("Another instance is already running")
+        return
 
-            # Get the dispatcher to register handlers
-            dispatcher = updater.dispatcher
+    try:
+        # Create the Updater and pass it your bot's token
+        updater = Updater(token, use_context=True)
+        bot_instance = updater
 
-            # Add command handlers
-            dispatcher.add_handler(CommandHandler("start", start))
-            dispatcher.add_handler(CommandHandler("help", help_command))
-            dispatcher.add_handler(CommandHandler("newmail", newmail))
-            dispatcher.add_handler(CommandHandler("current", current))
-            dispatcher.add_handler(CommandHandler("delete", delete_session))
-            dispatcher.add_handler(CommandHandler("stats", stats))
-            dispatcher.add_handler(CommandHandler("forward", forward))
-            dispatcher.add_handler(CallbackQueryHandler(button_callback))
+        # Get the dispatcher to register handlers
+        dispatcher = updater.dispatcher
 
-            # Start the Bot
-            updater.start_polling(drop_pending_updates=True)
-            logger.info("Bot started successfully!")
-            
-            # Keep the bot running
-            while True:
-                try:
-                    # Test bot connection every 30 seconds
-                    updater.bot.get_me()
-                    time.sleep(30)
-                except Exception as e:
-                    logger.error(f"Error in bot loop: {str(e)}")
-                    break
-                    
-            # Stop the bot before restarting
+        # Add command handlers
+        dispatcher.add_handler(CommandHandler("start", start))
+        dispatcher.add_handler(CommandHandler("help", help_command))
+        dispatcher.add_handler(CommandHandler("newmail", newmail))
+        dispatcher.add_handler(CommandHandler("current", current))
+        dispatcher.add_handler(CommandHandler("delete", delete_session))
+        dispatcher.add_handler(CommandHandler("stats", stats))
+        dispatcher.add_handler(CommandHandler("forward", forward))
+        dispatcher.add_handler(CallbackQueryHandler(button_callback))
+        
+        # Add error handler
+        dispatcher.add_error_handler(error_handler)
+
+        # Start the Bot with a longer timeout
+        updater.start_polling(drop_pending_updates=True, read_timeout=30, write_timeout=30)
+        logger.info("Bot started successfully!")
+        
+        # Keep the bot running
+        while True:
             try:
-                updater.stop()
+                # Test bot connection every 30 seconds
+                updater.bot.get_me()
+                time.sleep(30)
             except Exception as e:
-                logger.error(f"Error stopping bot: {str(e)}")
+                logger.error(f"Error in bot loop: {str(e)}")
+                break
                 
-        except Exception as e:
-            logger.error(f"Critical error in bot: {str(e)}")
-            
-        # Wait before trying to restart
-        logger.info("Bot stopped, attempting to restart in 5 seconds...")
-        time.sleep(5)
+    except Exception as e:
+        logger.error(f"Critical error in bot: {str(e)}")
+    finally:
+        cleanup()
 
 def run_web_server():
     """Run the Flask web server."""
@@ -438,4 +499,9 @@ if __name__ == '__main__':
     web_thread.start()
     
     # Run the bot in the main thread
-    run_bot() 
+    try:
+        run_bot()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+        cleanup()
+        sys.exit(0) 

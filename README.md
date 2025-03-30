@@ -1,64 +1,79 @@
 # DropMail Telegram Bot
 
-A Telegram bot that provides temporary email addresses using the DropMail API. This bot allows users to generate temporary email addresses and receive emails through them directly in Telegram.
+A Telegram bot that provides temporary email addresses using the DropMail API. This bot allows users to create disposable email addresses, receive emails, and manage their email sessions directly through Telegram.
 
 ## Features
 
-- Generate temporary email addresses
-- Receive emails directly in Telegram
-- Refresh button to check for new emails
-- Show current email address
-- Delete email session
+- Create temporary email addresses
+- View current email address
+- Delete email sessions
 - View email statistics
 - Set up email forwarding
-- Simple and user-friendly interface
-
-## Local Setup
-
-1. Clone this repository
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Create a `.env` file in the project root and add your Telegram Bot Token:
-   ```
-   TELEGRAM_BOT_TOKEN=your_bot_token_here
-   ```
-   To get a bot token, talk to [@BotFather](https://t.me/botfather) on Telegram.
-
-4. Run the bot:
-   ```bash
-   python bot.py
-   ```
-
-## Deployment on Render
-
-1. Fork this repository to your GitHub account
-2. Go to [Render Dashboard](https://dashboard.render.com/)
-3. Click "New +" and select "Web Service"
-4. Connect your GitHub repository
-5. Configure the service:
-   - Name: tempmail-bot
-   - Environment: Python
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `python bot.py`
-6. Add your environment variable:
-   - Key: `TELEGRAM_BOT_TOKEN`
-   - Value: Your Telegram bot token
-7. Click "Create Web Service"
+- Real-time email notifications
+- Refresh button to check for new emails
 
 ## Commands
 
 - `/start` - Start the bot and see welcome message
-- `/help` - Show help message with all commands
+- `/help` - Show help information
 - `/newmail` - Generate a new temporary email address
 - `/current` - Show current email address
 - `/delete` - Delete current email session
 - `/stats` - Show email statistics
 - `/forward` - Set up email forwarding
 
-## Note
+## Setup
 
-- Temporary email addresses expire after some time
-- Each user gets their own unique email address
-- Emails are displayed directly in the Telegram chat 
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/dropmail-bot.git
+cd dropmail-bot
+```
+
+2. Create and activate a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Create a `.env` file with your Telegram bot token:
+```
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+```
+
+5. Run the bot:
+```bash
+python bot.py
+```
+
+## Deployment
+
+This bot is designed to be deployed on Render.com. To deploy:
+
+1. Create a new Web Service on Render
+2. Connect your GitHub repository
+3. Set the following environment variables:
+   - `TELEGRAM_BOT_TOKEN`
+4. Set the start command to: `python bot.py`
+5. Set the health check path to: `/health`
+
+## Requirements
+
+- Python 3.11+
+- python-telegram-bot==13.7
+- flask==2.0.1
+- requests==2.26.0
+- python-dotenv==0.19.0
+
+## License
+
+MIT License
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. 
