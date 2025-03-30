@@ -22,16 +22,20 @@ logger = logging.getLogger(__name__)
 # DropMail API endpoint
 DROPMAIL_API = "https://dropmail.me/api/graphql/web-test"
 
-# Initialize Flask app
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "DropMail Bot is running! 🚀"
-
-@app.route('/health')
-def health_check():
-    return "OK", 200
+def create_app():
+    """Create and configure the Flask application."""
+    app = Flask(__name__)
+    
+    # Add routes
+    @app.route('/')
+    def home():
+        return "DropMail Bot is running! 🚀"
+    
+    @app.route('/health')
+    def health_check():
+        return "OK", 200
+    
+    return app
 
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
@@ -449,6 +453,9 @@ def main():
     """Start both the web server and the bot."""
     # Get port from environment variable or use default
     port = int(os.getenv("PORT", 8000))
+    
+    # Create Flask app
+    app = create_app()
     
     # Start the bot in a separate thread
     bot_thread = threading.Thread(target=run_bot)

@@ -1,8 +1,11 @@
 import multiprocessing
+from bot import create_app, run_bot
 import threading
-from bot import run_bot
 
-# Start the bot thread
+# Create the Flask application
+app = create_app()
+
+# Start the bot thread only once
 bot_thread = threading.Thread(target=run_bot)
 bot_thread.daemon = True
 bot_thread.start()
