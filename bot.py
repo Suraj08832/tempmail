@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import time
 from flask import Flask, jsonify, request
-import threading
+import multiprocessing
 import sys
 import atexit
 import tempfile
@@ -641,8 +641,14 @@ def error_handler(update: Update, context: CallbackContext) -> None:
                 logger.error(f"Error stopping bot: {str(e)}")
         time.sleep(5)
 
+def run_web_server():
+    """Run the Flask web server in a separate process."""
+    port = int(os.getenv("PORT", 10000))
+    logger.info(f"Starting web server on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
 def run_bot():
-    """Run the Telegram bot."""
+    """Run the Telegram bot in a separate process."""
     global bot_instance, is_shutting_down
     
     # Get the token from environment variable
@@ -733,40 +739,6 @@ def run_bot():
                 except Exception as e:
                     logger.error(f"Error stopping bot: {str(e)}")
 
-def run_web_server():
-    """Run the Flask web server."""
-    port = int(os.getenv("PORT", 10000))
-    logger.info(f"Starting web server on port {port}")
-    # Use Gunicorn for production
-    import gunicorn.app.baseapp
-    from gunicorn.app.baseapp import BaseApplication
-    
-    class StandaloneApplication(BaseApplication):
-        def __init__(self, app, options=None):
-            self.options = options or {}
-            self.application = app
-            super().__init__()
-
-        def load_config(self):
-            for key, value in self.options.items():
-                self.cfg.set(key, value)
-
-        def load(self):
-            return self.application
-
-    options = {
-        'bind': f'0.0.0.0:{port}',
-        'workers': 1,  # Single worker to prevent conflicts
-        'threads': 1,  # Single thread to prevent conflicts
-        'timeout': 120,
-        'worker_class': 'sync',
-        'accesslog': '-',
-        'errorlog': '-',
-        'loglevel': 'info'
-    }
-    
-    StandaloneApplication(app, options).run()
-
 if __name__ == '__main__':
     logger.info("Starting application...")
     
@@ -776,13 +748,13 @@ if __name__ == '__main__':
         sys.exit(1)
     
     try:
-        # Start the web server in a separate thread
-        web_thread = threading.Thread(target=run_web_server)
-        web_thread.daemon = True
-        web_thread.start()
-        logger.info("Web server thread started")
+        # Start the web server in a separate process
+        web_process = multiprocessing.Process(target=run_web_server)
+        web_process.daemon = True
+        web_process.start()
+        logger.info("Web server process started")
         
-        # Run the bot in the main thread
+        # Run the bot in the main process
         try:
             run_bot()
         except KeyboardInterrupt:
