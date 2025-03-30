@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from flask import Flask, request
 import threading
+import time
 
 # Load environment variables
 load_dotenv()
@@ -399,7 +400,16 @@ def run_bot():
     # Start the Bot
     updater.start_polling()
     logger.info("Bot started successfully!")
-    updater.idle()
+    
+    # Instead of using idle(), we'll use a simple loop to keep the bot running
+    while True:
+        try:
+            # Sleep for a short time to prevent high CPU usage
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"Error in bot thread: {str(e)}")
+            # If there's an error, wait a bit longer before retrying
+            time.sleep(5)
 
 def main():
     """Start both the web server and the bot."""
