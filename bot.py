@@ -15,6 +15,8 @@ import tempfile
 import re
 import signal
 import socket
+import fcntl
+import errno
 
 # Load environment variables
 load_dotenv()
@@ -43,6 +45,7 @@ is_shutting_down = False
 last_response_time = datetime.now()
 last_health_check = datetime.now()
 lock_file = None
+lock_fd = None
 
 # Spam keywords (can be expanded)
 SPAM_KEYWORDS = [
@@ -51,40 +54,34 @@ SPAM_KEYWORDS = [
 ]
 
 def acquire_lock():
-    """Acquire a lock to prevent multiple instances."""
-    global lock_file
+    """Acquire a lock to prevent multiple instances using fcntl."""
+    global lock_file, lock_fd
     try:
         lock_path = os.path.join(tempfile.gettempdir(), 'tempmail_bot.lock')
-        # Try to create the lock file
-        if os.path.exists(lock_path):
-            # Check if the process that created the lock is still running
-            try:
-                with open(lock_path, 'r') as f:
-                    pid = int(f.read().strip())
-                # Try to send a signal to the process
-                os.kill(pid, 0)
-                return False
-            except (ValueError, ProcessLookupError):
-                # Process is not running, we can take the lock
-                pass
-        
-        # Create or update the lock file with our PID
-        with open(lock_path, 'w') as f:
-            f.write(str(os.getpid()))
+        lock_fd = open(lock_path, 'w')
+        fcntl.lockf(lock_fd, fcntl.F_TLOCK, 0)
         lock_file = lock_path
         return True
-    except Exception as e:
-        logger.error(f"Error acquiring lock: {str(e)}")
-        return False
+    except IOError as e:
+        if e.errno == errno.EACCES or e.errno == errno.EAGAIN:
+            logger.error("Another instance is already running")
+            return False
+        raise
 
 def release_lock():
     """Release the lock file."""
-    global lock_file
+    global lock_file, lock_fd
+    if lock_fd:
+        try:
+            fcntl.lockf(lock_fd, fcntl.F_ULOCK, 0)
+            lock_fd.close()
+        except Exception as e:
+            logger.error(f"Error releasing lock: {str(e)}")
     if lock_file and os.path.exists(lock_file):
         try:
             os.remove(lock_file)
         except Exception as e:
-            logger.error(f"Error releasing lock: {str(e)}")
+            logger.error(f"Error removing lock file: {str(e)}")
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
@@ -620,9 +617,14 @@ def error_handler(update: Update, context: CallbackContext) -> None:
     update_last_response()  # Update last response time even on errors
     
     if isinstance(context.error, Conflict):
-        logger.warning("Conflict detected - continuing operation...")
-        # Don't stop the bot on conflict, just continue
-        time.sleep(5)  # Reduced sleep time on conflict
+        logger.warning("Conflict detected - stopping bot to prevent multiple instances")
+        if bot_instance:
+            try:
+                bot_instance.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+        time.sleep(5)  # Wait before restarting
+        sys.exit(1)  # Exit to allow the process manager to restart
     elif isinstance(context.error, (TimedOut, NetworkError)):
         logger.warning("Network error occurred - will retry automatically")
         if bot_instance:
@@ -630,7 +632,7 @@ def error_handler(update: Update, context: CallbackContext) -> None:
                 bot_instance.stop()
             except Exception as e:
                 logger.error(f"Error stopping bot: {str(e)}")
-        time.sleep(5)  # Reduced sleep time on network errors
+        time.sleep(5)
     else:
         logger.error(f"Unexpected error: {context.error}")
         logger.exception("Full traceback for unexpected error:")
