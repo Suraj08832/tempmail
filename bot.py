@@ -690,7 +690,7 @@ def run_bot():
             updater.bot.request.pool_timeout = 30
             
             # Start polling with proper parameters
-            updater.start_polling(drop_pending_updates=True, read_timeout=30, write_timeout=30)
+            updater.start_polling(drop_pending_updates=True)
             logger.info("Bot started successfully!")
             
             # Reset retry count on successful start
