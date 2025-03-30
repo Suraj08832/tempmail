@@ -375,41 +375,75 @@ def button_callback(update: Update, context: CallbackContext):
 
 def run_bot():
     """Run the Telegram bot."""
-    # Get the token from environment variable
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
-        return
-
-    # Create the Updater and pass it your bot's token
-    updater = Updater(token, use_context=True)
-
-    # Get the dispatcher to register handlers
-    dispatcher = updater.dispatcher
-
-    # Add command handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
-    dispatcher.add_handler(CommandHandler("newmail", newmail))
-    dispatcher.add_handler(CommandHandler("current", current))
-    dispatcher.add_handler(CommandHandler("delete", delete_session))
-    dispatcher.add_handler(CommandHandler("stats", stats))
-    dispatcher.add_handler(CommandHandler("forward", forward))
-    dispatcher.add_handler(CallbackQueryHandler(button_callback))
-
-    # Start the Bot
-    updater.start_polling()
-    logger.info("Bot started successfully!")
-    
-    # Instead of using idle(), we'll use a simple loop to keep the bot running
-    while True:
+    while True:  # Outer loop for continuous operation
         try:
-            # Sleep for a short time to prevent high CPU usage
-            time.sleep(1)
+            # Get the token from environment variable
+            token = os.getenv("TELEGRAM_BOT_TOKEN")
+            if not token:
+                logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
+                time.sleep(60)  # Wait before retrying
+                continue
+
+            # Create the Updater and pass it your bot's token
+            updater = Updater(token, use_context=True)
+
+            # Get the dispatcher to register handlers
+            dispatcher = updater.dispatcher
+
+            # Add command handlers
+            dispatcher.add_handler(CommandHandler("start", start))
+            dispatcher.add_handler(CommandHandler("help", help_command))
+            dispatcher.add_handler(CommandHandler("newmail", newmail))
+            dispatcher.add_handler(CommandHandler("current", current))
+            dispatcher.add_handler(CommandHandler("delete", delete_session))
+            dispatcher.add_handler(CommandHandler("stats", stats))
+            dispatcher.add_handler(CommandHandler("forward", forward))
+            dispatcher.add_handler(CallbackQueryHandler(button_callback))
+
+            # Start the Bot with error handling
+            try:
+                updater.start_polling(drop_pending_updates=True, timeout=30)
+                logger.info("Bot started successfully!")
+            except Exception as e:
+                logger.error(f"Error starting bot: {str(e)}")
+                raise
+
+            # Keep the bot running with health checks
+            last_check = time.time()
+            while True:
+                try:
+                    current_time = time.time()
+                    # Check bot health every 30 seconds
+                    if current_time - last_check > 30:
+                        if not updater.running:
+                            logger.warning("Bot stopped running, restarting...")
+                            break
+                        # Test bot connection
+                        try:
+                            updater.bot.get_me()
+                        except Exception as e:
+                            logger.error(f"Bot connection test failed: {str(e)}")
+                            break
+                        last_check = current_time
+                    
+                    # Sleep for a short time to prevent high CPU usage
+                    time.sleep(1)
+                except Exception as e:
+                    logger.error(f"Error in bot loop: {str(e)}")
+                    break
+                    
+            # Stop the bot before restarting
+            try:
+                updater.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+            
         except Exception as e:
-            logger.error(f"Error in bot thread: {str(e)}")
-            # If there's an error, wait a bit longer before retrying
-            time.sleep(5)
+            logger.error(f"Critical error in bot: {str(e)}")
+            
+        # Wait before trying to restart
+        logger.info("Bot stopped, attempting to restart in 5 seconds...")
+        time.sleep(5)
 
 def main():
     """Start both the web server and the bot."""
@@ -421,8 +455,14 @@ def main():
     # Get port from environment variable or use default
     port = int(os.getenv("PORT", 8000))
     
-    # Start the Flask app
-    app.run(host='0.0.0.0', port=port)
+    # Start the Flask app with production settings
+    app.run(
+        host='0.0.0.0',
+        port=port,
+        debug=False,  # Disable debug mode in production
+        use_reloader=False,  # Disable reloader in production
+        threaded=True  # Enable threading for better performance
+    )
 
 if __name__ == '__main__':
     main() 
