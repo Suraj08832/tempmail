@@ -10,7 +10,6 @@ import time
 from flask import Flask, jsonify, request
 import threading
 import sys
-import fcntl
 import atexit
 import tempfile
 import re
@@ -53,10 +52,20 @@ def acquire_lock():
     try:
         # Use tempfile to get a system-appropriate temporary directory
         lock_path = os.path.join(tempfile.gettempdir(), 'bot.lock')
+        
+        # Check if lock file exists and is not stale (older than 5 minutes)
+        if os.path.exists(lock_path):
+            if time.time() - os.path.getmtime(lock_path) > 300:  # 5 minutes
+                os.remove(lock_path)
+            else:
+                return False
+                
+        # Create lock file
         lock_file = open(lock_path, 'w')
-        fcntl.lockf(lock_file, fcntl.F_EXLCK)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
         return True
-    except (IOError, AttributeError) as e:
+    except Exception as e:
         logger.warning(f"Could not acquire lock: {str(e)}")
         return False
 
@@ -65,7 +74,6 @@ def release_lock():
     global lock_file
     if lock_file:
         try:
-            fcntl.lockf(lock_file, fcntl.F_UNLCK)
             lock_file.close()
             try:
                 os.remove(os.path.join(tempfile.gettempdir(), 'bot.lock'))
