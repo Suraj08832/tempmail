@@ -690,7 +690,7 @@ def run_bot():
             updater.bot.request.pool_timeout = 30
             
             # Start polling with proper parameters
-            updater.start_polling(drop_pending_updates=True)
+            updater.start_polling(drop_pending_updates=True, read_timeout=30, write_timeout=30)
             logger.info("Bot started successfully!")
             
             # Reset retry count on successful start
@@ -737,7 +737,35 @@ def run_web_server():
     """Run the Flask web server."""
     port = int(os.getenv("PORT", 10000))
     logger.info(f"Starting web server on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    # Use Gunicorn for production
+    import gunicorn.app.baseapp
+    from gunicorn.app.baseapp import BaseApplication
+    
+    class StandaloneApplication(BaseApplication):
+        def __init__(self, app, options=None):
+            self.options = options or {}
+            self.application = app
+            super().__init__()
+
+        def load_config(self):
+            for key, value in self.options.items():
+                self.cfg.set(key, value)
+
+        def load(self):
+            return self.application
+
+    options = {
+        'bind': f'0.0.0.0:{port}',
+        'workers': 1,  # Single worker to prevent conflicts
+        'threads': 1,  # Single thread to prevent conflicts
+        'timeout': 120,
+        'worker_class': 'sync',
+        'accesslog': '-',
+        'errorlog': '-',
+        'loglevel': 'info'
+    }
+    
+    StandaloneApplication(app, options).run()
 
 if __name__ == '__main__':
     logger.info("Starting application...")
