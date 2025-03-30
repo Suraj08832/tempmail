@@ -590,6 +590,10 @@ def run_bot():
         logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
         return
 
+    retry_count = 0
+    max_retries = 5
+    retry_delay = 10
+
     while not is_shutting_down:
         try:
             logger.info("Creating Updater with token...")
@@ -621,6 +625,9 @@ def run_bot():
             updater.start_polling(drop_pending_updates=True)
             logger.info("Bot started successfully!")
             
+            # Reset retry count on successful start
+            retry_count = 0
+            
             # Keep the bot running
             while not is_shutting_down:
                 try:
@@ -631,16 +638,24 @@ def run_bot():
                 except Exception as e:
                     logger.error(f"Error in bot loop: {str(e)}")
                     if not is_shutting_down:
-                        logger.info("Waiting 5 seconds before retrying...")
-                        time.sleep(5)  # Wait before retrying
-                    break  # Break inner loop to restart bot
+                        retry_count += 1
+                        if retry_count >= max_retries:
+                            logger.error(f"Max retries ({max_retries}) reached. Restarting bot...")
+                            break
+                        logger.info(f"Waiting {retry_delay} seconds before retrying... (Attempt {retry_count}/{max_retries})")
+                        time.sleep(retry_delay)
+                    continue
                     
         except Exception as e:
             logger.error(f"Critical error in bot: {str(e)}")
             logger.exception("Full traceback:")
             if not is_shutting_down:
-                logger.info("Attempting to restart bot in 10 seconds...")
-                time.sleep(10)  # Wait before restarting
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(f"Max retries ({max_retries}) reached. Exiting...")
+                    break
+                logger.info(f"Attempting to restart bot in {retry_delay} seconds... (Attempt {retry_count}/{max_retries})")
+                time.sleep(retry_delay)
             continue
         finally:
             if bot_instance:
