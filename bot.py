@@ -644,9 +644,16 @@ def run_bot():
             # Add error handler
             dispatcher.add_error_handler(error_handler)
 
-            # Start the Bot with a longer timeout
+            # Start the Bot with proper configuration
             logger.info("Starting polling...")
-            updater.start_polling(drop_pending_updates=True, read_timeout=30, write_timeout=30)
+            # Configure the bot's request timeout
+            updater.bot.request.read_timeout = 30
+            updater.bot.request.write_timeout = 30
+            updater.bot.request.connect_timeout = 30
+            updater.bot.request.pool_timeout = 30
+            
+            # Start polling with proper parameters
+            updater.start_polling(drop_pending_updates=True)
             logger.info("Bot started successfully!")
             
             # Reset retry and conflict counts on successful start
