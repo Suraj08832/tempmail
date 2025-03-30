@@ -84,9 +84,9 @@ def health_check():
     global last_response_time, last_health_check
     last_health_check = datetime.now()
     
-    # Check if bot has responded in the last 5 minutes
+    # Check if bot has responded in the last 3 minutes
     time_since_last_response = (datetime.now() - last_response_time).total_seconds()
-    is_healthy = time_since_last_response < 300  # 5 minutes = 300 seconds
+    is_healthy = time_since_last_response < 180  # 3 minutes = 180 seconds
     
     if not is_healthy:
         logger.warning(f"Health check failed: No response for {time_since_last_response} seconds")

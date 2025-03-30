@@ -9,7 +9,7 @@ services:
         sync: false
         value: 8132711759:AAHUIrEfsDo0bID_4LKBr9x9qIYyUcPk3lQ
     healthCheckPath: /health
-    healthCheckTimeout: 300
+    healthCheckTimeout: 180
     healthCheckInterval: 60
     autoDeploy: true
     plan: free
