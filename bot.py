@@ -5,6 +5,8 @@ from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, Callback
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
+from flask import Flask, request
+import threading
 
 # Load environment variables
 load_dotenv()
@@ -18,6 +20,17 @@ logger = logging.getLogger(__name__)
 
 # DropMail API endpoint
 DROPMAIL_API = "https://dropmail.me/api/graphql/web-test"
+
+# Initialize Flask app
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "DropMail Bot is running! 🚀"
+
+@app.route('/health')
+def health_check():
+    return "OK", 200
 
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
@@ -359,8 +372,8 @@ def button_callback(update: Update, context: CallbackContext):
             logger.error(f"Error in button_callback: {str(e)}")
             callback_query.message.reply_text("❌ An error occurred while fetching emails.")
 
-def main():
-    """Start the bot."""
+def run_bot():
+    """Run the Telegram bot."""
     # Get the token from environment variable
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -385,7 +398,21 @@ def main():
 
     # Start the Bot
     updater.start_polling()
+    logger.info("Bot started successfully!")
     updater.idle()
+
+def main():
+    """Start both the web server and the bot."""
+    # Start the bot in a separate thread
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # Get port from environment variable or use default
+    port = int(os.getenv("PORT", 8000))
+    
+    # Start the Flask app
+    app.run(host='0.0.0.0', port=port)
 
 if __name__ == '__main__':
     main() 
