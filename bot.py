@@ -18,10 +18,14 @@ import signal
 # Load environment variables
 load_dotenv()
 
-# Configure logging
+# Configure logging with more detailed format
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('bot.log')
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -50,8 +54,8 @@ def signal_handler(signum, frame):
     if bot_instance:
         try:
             bot_instance.stop()
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Error stopping bot: {str(e)}")
     sys.exit(0)
 
 # Register signal handlers
@@ -556,8 +560,8 @@ def error_handler(update: Update, context: CallbackContext) -> None:
         if bot_instance:
             try:
                 bot_instance.stop()
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
         time.sleep(5)
     elif isinstance(context.error, (TimedOut, NetworkError)):
         logger.warning("Network error occurred - will retry automatically")
@@ -575,6 +579,7 @@ def run_bot():
         return
 
     try:
+        logger.info("Creating Updater with token...")
         # Create the Updater and pass it your bot's token
         updater = Updater(token=token, use_context=True)
         bot_instance = updater
@@ -583,6 +588,7 @@ def run_bot():
         dispatcher = updater.dispatcher
 
         # Add command handlers
+        logger.info("Registering command handlers...")
         dispatcher.add_handler(CommandHandler("start", start))
         dispatcher.add_handler(CommandHandler("help", help_command))
         dispatcher.add_handler(CommandHandler("newmail", newmail))
@@ -598,6 +604,7 @@ def run_bot():
         dispatcher.add_error_handler(error_handler)
 
         # Start the Bot
+        logger.info("Starting polling...")
         updater.start_polling(drop_pending_updates=True)
         logger.info("Bot started successfully!")
         
@@ -605,33 +612,40 @@ def run_bot():
         while not is_shutting_down:
             try:
                 # Test bot connection every 30 seconds
-                updater.bot.get_me()
+                bot_info = updater.bot.get_me()
+                logger.info(f"Bot is running: @{bot_info.username}")
                 time.sleep(30)
             except Exception as e:
                 logger.error(f"Error in bot loop: {str(e)}")
                 if not is_shutting_down:
+                    logger.info("Waiting 5 seconds before retrying...")
                     time.sleep(5)  # Wait before retrying
                 continue
                 
     except Exception as e:
         logger.error(f"Critical error in bot: {str(e)}")
+        logger.exception("Full traceback:")
     finally:
         if bot_instance:
             try:
+                logger.info("Stopping bot...")
                 bot_instance.stop()
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
 
 def run_web_server():
     """Run the Flask web server."""
     port = int(os.getenv("PORT", 8000))
+    logger.info(f"Starting web server on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
+    logger.info("Starting application...")
     # Start the web server in a separate thread
     web_thread = threading.Thread(target=run_web_server)
     web_thread.daemon = True
     web_thread.start()
+    logger.info("Web server thread started")
     
     # Run the bot in the main thread
     try:
@@ -641,6 +655,10 @@ if __name__ == '__main__':
         if bot_instance:
             try:
                 bot_instance.stop()
-            except:
-                pass
-        sys.exit(0) 
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Unexpected error in main: {str(e)}")
+        logger.exception("Full traceback:")
+        sys.exit(1) 
