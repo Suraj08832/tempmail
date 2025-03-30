@@ -598,6 +598,7 @@ def error_handler(update: Update, context: CallbackContext) -> None:
         time.sleep(5)
     else:
         logger.error(f"Unexpected error: {context.error}")
+        logger.exception("Full traceback for unexpected error:")
         if bot_instance:
             try:
                 bot_instance.stop()
@@ -659,6 +660,16 @@ def run_bot():
                     # Test bot connection every 30 seconds
                     bot_info = updater.bot.get_me()
                     logger.info(f"Bot is running: @{bot_info.username}")
+                    
+                    # Test if bot can receive updates
+                    try:
+                        # Try to get updates to verify connection
+                        updates = updater.bot.get_updates(offset=-1, timeout=1)
+                        if updates:
+                            logger.info(f"Received {len(updates)} updates")
+                    except Exception as e:
+                        logger.warning(f"Error getting updates: {str(e)}")
+                    
                     time.sleep(30)
                 except Exception as e:
                     logger.error(f"Error in bot loop: {str(e)}")
