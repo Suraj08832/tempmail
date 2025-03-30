@@ -472,7 +472,7 @@ if __name__ == '__main__':
         bot_thread.daemon = True
         bot_thread.start()
         
-        # Run Gunicorn
+        # Run Gunicorn with our config
         import gunicorn.app.baseapp
         gunicorn.app.baseapp.Application().run()
     else:
