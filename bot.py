@@ -633,8 +633,8 @@ def run_bot():
         # Add error handler
         dispatcher.add_error_handler(error_handler)
 
-        # Start the Bot with a longer timeout
-        updater.start_polling(drop_pending_updates=True, read_timeout=30, write_timeout=30)
+        # Start the Bot
+        updater.start_polling(drop_pending_updates=True)
         logger.info("Bot started successfully!")
         
         # Keep the bot running
