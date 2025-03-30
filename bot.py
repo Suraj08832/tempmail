@@ -5,8 +5,6 @@ from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, Callback
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
-from flask import Flask, request
-import threading
 import time
 
 # Load environment variables
@@ -21,21 +19,6 @@ logger = logging.getLogger(__name__)
 
 # DropMail API endpoint
 DROPMAIL_API = "https://dropmail.me/api/graphql/web-test"
-
-def create_app():
-    """Create and configure the Flask application."""
-    app = Flask(__name__)
-    
-    # Add routes
-    @app.route('/')
-    def home():
-        return "DropMail Bot is running! 🚀"
-    
-    @app.route('/health')
-    def health_check():
-        return "OK", 200
-    
-    return app
 
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
@@ -404,78 +387,16 @@ def run_bot():
             dispatcher.add_handler(CommandHandler("forward", forward))
             dispatcher.add_handler(CallbackQueryHandler(button_callback))
 
-            # Start the Bot with error handling
-            try:
-                updater.start_polling(drop_pending_updates=True, timeout=30)
-                logger.info("Bot started successfully!")
-            except Exception as e:
-                logger.error(f"Error starting bot: {str(e)}")
-                raise
-
-            # Keep the bot running with health checks
-            last_check = time.time()
-            while True:
-                try:
-                    current_time = time.time()
-                    # Check bot health every 30 seconds
-                    if current_time - last_check > 30:
-                        if not updater.running:
-                            logger.warning("Bot stopped running, restarting...")
-                            break
-                        # Test bot connection
-                        try:
-                            updater.bot.get_me()
-                        except Exception as e:
-                            logger.error(f"Bot connection test failed: {str(e)}")
-                            break
-                        last_check = current_time
-                    
-                    # Sleep for a short time to prevent high CPU usage
-                    time.sleep(1)
-                except Exception as e:
-                    logger.error(f"Error in bot loop: {str(e)}")
-                    break
-                    
-            # Stop the bot before restarting
-            try:
-                updater.stop()
-            except Exception as e:
-                logger.error(f"Error stopping bot: {str(e)}")
+            # Start the Bot
+            updater.start_polling(drop_pending_updates=True)
+            logger.info("Bot started successfully!")
+            
+            # Run the bot until you press Ctrl-C
+            updater.idle()
             
         except Exception as e:
             logger.error(f"Critical error in bot: {str(e)}")
-            
-        # Wait before trying to restart
-        logger.info("Bot stopped, attempting to restart in 5 seconds...")
-        time.sleep(5)
-
-def main():
-    """Start both the web server and the bot."""
-    # Get port from environment variable or use default
-    port = int(os.getenv("PORT", 8000))
-    
-    # Create Flask app
-    app = create_app()
-    
-    # Start the bot in a separate thread
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # Start the Flask app with production settings
-    app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=False,  # Disable debug mode in production
-        use_reloader=False,  # Disable reloader in production
-        threaded=True  # Enable threading for better performance
-    )
+            time.sleep(5)  # Wait before retrying
 
 if __name__ == '__main__':
-    # Use Gunicorn for production
-    if os.getenv('FLASK_ENV') == 'production':
-        # Run Gunicorn with our config
-        import gunicorn.app.baseapp
-        gunicorn.app.baseapp.Application().run()
-    else:
-        main() 
+    run_bot() 
