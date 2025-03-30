@@ -465,4 +465,9 @@ def main():
     )
 
 if __name__ == '__main__':
-    main() 
+    # Use Gunicorn for production
+    if os.getenv('FLASK_ENV') == 'production':
+        import gunicorn.app.baseapp
+        gunicorn.app.baseapp.Application().run()
+    else:
+        main() 
