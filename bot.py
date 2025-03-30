@@ -6,6 +6,8 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime
 import time
+from flask import Flask
+import threading
 
 # Load environment variables
 load_dotenv()
@@ -19,6 +21,17 @@ logger = logging.getLogger(__name__)
 
 # DropMail API endpoint
 DROPMAIL_API = "https://dropmail.me/api/graphql/web-test"
+
+# Initialize Flask app
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "DropMail Bot is running! 🚀"
+
+@app.route('/health')
+def health_check():
+    return "OK", 200
 
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
@@ -394,8 +407,18 @@ def run_bot():
         
     except Exception as e:
         logger.error(f"Critical error in bot: {str(e)}")
-        # Don't restart the bot on error, let Render handle it
         raise
 
+def run_web_server():
+    """Run the Flask web server."""
+    port = int(os.getenv("PORT", 8000))
+    app.run(host='0.0.0.0', port=port)
+
 if __name__ == '__main__':
-    run_bot() 
+    # Start the bot in a separate thread
+    bot_thread = threading.Thread(target=run_bot)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    # Run the web server in the main thread
+    run_web_server() 
