@@ -565,8 +565,20 @@ def error_handler(update: Update, context: CallbackContext) -> None:
         time.sleep(5)
     elif isinstance(context.error, (TimedOut, NetworkError)):
         logger.warning("Network error occurred - will retry automatically")
+        if bot_instance:
+            try:
+                bot_instance.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+        time.sleep(5)
     else:
         logger.error(f"Unexpected error: {context.error}")
+        if bot_instance:
+            try:
+                bot_instance.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+        time.sleep(5)
 
 def run_bot():
     """Run the Telegram bot."""
@@ -578,60 +590,65 @@ def run_bot():
         logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
         return
 
-    try:
-        logger.info("Creating Updater with token...")
-        # Create the Updater and pass it your bot's token
-        updater = Updater(token=token, use_context=True)
-        bot_instance = updater
+    while not is_shutting_down:
+        try:
+            logger.info("Creating Updater with token...")
+            # Create the Updater and pass it your bot's token
+            updater = Updater(token=token, use_context=True)
+            bot_instance = updater
 
-        # Get the dispatcher to register handlers
-        dispatcher = updater.dispatcher
+            # Get the dispatcher to register handlers
+            dispatcher = updater.dispatcher
 
-        # Add command handlers
-        logger.info("Registering command handlers...")
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(CommandHandler("help", help_command))
-        dispatcher.add_handler(CommandHandler("newmail", newmail))
-        dispatcher.add_handler(CommandHandler("current", current))
-        dispatcher.add_handler(CommandHandler("delete", delete_session))
-        dispatcher.add_handler(CommandHandler("stats", stats))
-        dispatcher.add_handler(CommandHandler("forward", forward))
-        dispatcher.add_handler(CommandHandler("extend", extend_lifetime))
-        dispatcher.add_handler(CommandHandler("privacy", privacy_tips))
-        dispatcher.add_handler(CallbackQueryHandler(button_callback))
-        
-        # Add error handler
-        dispatcher.add_error_handler(error_handler)
+            # Add command handlers
+            logger.info("Registering command handlers...")
+            dispatcher.add_handler(CommandHandler("start", start))
+            dispatcher.add_handler(CommandHandler("help", help_command))
+            dispatcher.add_handler(CommandHandler("newmail", newmail))
+            dispatcher.add_handler(CommandHandler("current", current))
+            dispatcher.add_handler(CommandHandler("delete", delete_session))
+            dispatcher.add_handler(CommandHandler("stats", stats))
+            dispatcher.add_handler(CommandHandler("forward", forward))
+            dispatcher.add_handler(CommandHandler("extend", extend_lifetime))
+            dispatcher.add_handler(CommandHandler("privacy", privacy_tips))
+            dispatcher.add_handler(CallbackQueryHandler(button_callback))
+            
+            # Add error handler
+            dispatcher.add_error_handler(error_handler)
 
-        # Start the Bot
-        logger.info("Starting polling...")
-        updater.start_polling(drop_pending_updates=True)
-        logger.info("Bot started successfully!")
-        
-        # Keep the bot running
-        while not is_shutting_down:
-            try:
-                # Test bot connection every 30 seconds
-                bot_info = updater.bot.get_me()
-                logger.info(f"Bot is running: @{bot_info.username}")
-                time.sleep(30)
-            except Exception as e:
-                logger.error(f"Error in bot loop: {str(e)}")
-                if not is_shutting_down:
-                    logger.info("Waiting 5 seconds before retrying...")
-                    time.sleep(5)  # Wait before retrying
-                continue
-                
-    except Exception as e:
-        logger.error(f"Critical error in bot: {str(e)}")
-        logger.exception("Full traceback:")
-    finally:
-        if bot_instance:
-            try:
-                logger.info("Stopping bot...")
-                bot_instance.stop()
-            except Exception as e:
-                logger.error(f"Error stopping bot: {str(e)}")
+            # Start the Bot
+            logger.info("Starting polling...")
+            updater.start_polling(drop_pending_updates=True)
+            logger.info("Bot started successfully!")
+            
+            # Keep the bot running
+            while not is_shutting_down:
+                try:
+                    # Test bot connection every 30 seconds
+                    bot_info = updater.bot.get_me()
+                    logger.info(f"Bot is running: @{bot_info.username}")
+                    time.sleep(30)
+                except Exception as e:
+                    logger.error(f"Error in bot loop: {str(e)}")
+                    if not is_shutting_down:
+                        logger.info("Waiting 5 seconds before retrying...")
+                        time.sleep(5)  # Wait before retrying
+                    break  # Break inner loop to restart bot
+                    
+        except Exception as e:
+            logger.error(f"Critical error in bot: {str(e)}")
+            logger.exception("Full traceback:")
+            if not is_shutting_down:
+                logger.info("Attempting to restart bot in 10 seconds...")
+                time.sleep(10)  # Wait before restarting
+            continue
+        finally:
+            if bot_instance:
+                try:
+                    logger.info("Stopping bot...")
+                    bot_instance.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping bot: {str(e)}")
 
 def run_web_server():
     """Run the Flask web server."""
