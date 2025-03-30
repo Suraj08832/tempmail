@@ -583,7 +583,7 @@ def error_handler(update: Update, context: CallbackContext) -> None:
     if isinstance(context.error, Conflict):
         logger.warning("Conflict detected - continuing operation...")
         # Don't stop the bot on conflict, just continue
-        time.sleep(5)
+        time.sleep(10)  # Increased sleep time on conflict
     elif isinstance(context.error, (TimedOut, NetworkError)):
         logger.warning("Network error occurred - will retry automatically")
         if bot_instance:
@@ -591,7 +591,7 @@ def error_handler(update: Update, context: CallbackContext) -> None:
                 bot_instance.stop()
             except Exception as e:
                 logger.error(f"Error stopping bot: {str(e)}")
-        time.sleep(5)
+        time.sleep(10)  # Increased sleep time on network errors
     else:
         logger.error(f"Unexpected error: {context.error}")
         logger.exception("Full traceback for unexpected error:")
@@ -615,6 +615,8 @@ def run_bot():
     retry_count = 0
     max_retries = 5
     retry_delay = 10
+    conflict_count = 0
+    max_conflicts = 3
 
     while not is_shutting_down:
         try:
@@ -642,13 +644,14 @@ def run_bot():
             # Add error handler
             dispatcher.add_error_handler(error_handler)
 
-            # Start the Bot
+            # Start the Bot with a longer timeout
             logger.info("Starting polling...")
-            updater.start_polling(drop_pending_updates=True)
+            updater.start_polling(drop_pending_updates=True, read_timeout=30, write_timeout=30)
             logger.info("Bot started successfully!")
             
-            # Reset retry count on successful start
+            # Reset retry and conflict counts on successful start
             retry_count = 0
+            conflict_count = 0
             
             # Keep the bot running
             while not is_shutting_down:
@@ -657,17 +660,26 @@ def run_bot():
                     bot_info = updater.bot.get_me()
                     logger.info(f"Bot is running: @{bot_info.username}")
                     
-                    # Test if bot can receive updates
+                    # Test if bot can receive updates with increased timeout
                     try:
-                        # Try to get updates to verify connection
-                        updates = updater.bot.get_updates(offset=-1, timeout=1)
+                        # Try to get updates to verify connection with longer timeout
+                        updates = updater.bot.get_updates(offset=-1, timeout=5)
                         if updates:
                             logger.info(f"Received {len(updates)} updates")
+                            # Reset conflict count on successful update
+                            conflict_count = 0
                     except Exception as e:
                         if "Conflict" in str(e):
-                            logger.warning("Conflict detected in update check, continuing...")
+                            conflict_count += 1
+                            logger.warning(f"Conflict detected in update check (attempt {conflict_count}/{max_conflicts})")
+                            if conflict_count >= max_conflicts:
+                                logger.error("Too many conflicts detected, restarting bot...")
+                                break
+                            # Wait longer between retries on conflict
+                            time.sleep(10)
                         else:
                             logger.warning(f"Error getting updates: {str(e)}")
+                            conflict_count = 0  # Reset on non-conflict errors
                     
                     time.sleep(30)
                 except Exception as e:
