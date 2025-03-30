@@ -14,6 +14,8 @@ import atexit
 import tempfile
 import re
 import signal
+import fcntl
+import socket
 
 # Load environment variables
 load_dotenv()
@@ -41,12 +43,35 @@ user_sessions = {}
 is_shutting_down = False
 last_response_time = datetime.now()
 last_health_check = datetime.now()
+lock_file = None
 
 # Spam keywords (can be expanded)
 SPAM_KEYWORDS = [
     'lottery', 'winner', 'inheritance', 'urgent', 'million',
     'bank transfer', 'account suspended', 'verify account'
 ]
+
+def acquire_lock():
+    """Acquire a lock to prevent multiple instances."""
+    global lock_file
+    try:
+        # Create a lock file in the temp directory
+        lock_file = open(os.path.join(tempfile.gettempdir(), 'tempmail_bot.lock'), 'w')
+        fcntl.lockf(lock_file, fcntl.F_TLOCK, 0)
+        return True
+    except IOError:
+        return False
+
+def release_lock():
+    """Release the lock file."""
+    global lock_file
+    if lock_file:
+        fcntl.lockf(lock_file, fcntl.F_ULOCK, 0)
+        lock_file.close()
+        try:
+            os.remove(os.path.join(tempfile.gettempdir(), 'tempmail_bot.lock'))
+        except:
+            pass
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
@@ -58,6 +83,7 @@ def signal_handler(signum, frame):
             bot_instance.stop()
         except Exception as e:
             logger.error(f"Error stopping bot: {str(e)}")
+    release_lock()
     sys.exit(0)
 
 # Register signal handlers
@@ -702,24 +728,33 @@ def run_web_server():
 
 if __name__ == '__main__':
     logger.info("Starting application...")
-    # Start the web server in a separate thread
-    web_thread = threading.Thread(target=run_web_server)
-    web_thread.daemon = True
-    web_thread.start()
-    logger.info("Web server thread started")
     
-    # Run the bot in the main thread
+    # Try to acquire lock
+    if not acquire_lock():
+        logger.error("Another instance is already running. Exiting...")
+        sys.exit(1)
+    
     try:
-        run_bot()
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-        if bot_instance:
-            try:
-                bot_instance.stop()
-            except Exception as e:
-                logger.error(f"Error stopping bot: {str(e)}")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"Unexpected error in main: {str(e)}")
-        logger.exception("Full traceback:")
-        sys.exit(1) 
+        # Start the web server in a separate thread
+        web_thread = threading.Thread(target=run_web_server)
+        web_thread.daemon = True
+        web_thread.start()
+        logger.info("Web server thread started")
+        
+        # Run the bot in the main thread
+        try:
+            run_bot()
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user")
+            if bot_instance:
+                try:
+                    bot_instance.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping bot: {str(e)}")
+            sys.exit(0)
+        except Exception as e:
+            logger.error(f"Unexpected error in main: {str(e)}")
+            logger.exception("Full traceback:")
+            sys.exit(1)
+    finally:
+        release_lock() 
