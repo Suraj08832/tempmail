@@ -32,7 +32,6 @@ app = Flask(__name__)
 
 # Global variables
 bot_instance = None
-lock_file = None
 user_sessions = {}
 
 # Spam keywords (can be expanded)
@@ -45,54 +44,6 @@ def is_spam(text):
     """Check if text contains spam keywords."""
     text = text.lower()
     return any(keyword in text for keyword in SPAM_KEYWORDS)
-
-def acquire_lock():
-    """Acquire a lock file to ensure only one instance runs."""
-    global lock_file
-    try:
-        # Use tempfile to get a system-appropriate temporary directory
-        lock_path = os.path.join(tempfile.gettempdir(), 'bot.lock')
-        
-        # Check if lock file exists and is not stale (older than 5 minutes)
-        if os.path.exists(lock_path):
-            if time.time() - os.path.getmtime(lock_path) > 300:  # 5 minutes
-                os.remove(lock_path)
-            else:
-                return False
-                
-        # Create lock file
-        lock_file = open(lock_path, 'w')
-        lock_file.write(str(os.getpid()))
-        lock_file.flush()
-        return True
-    except Exception as e:
-        logger.warning(f"Could not acquire lock: {str(e)}")
-        return False
-
-def release_lock():
-    """Release the lock file."""
-    global lock_file
-    if lock_file:
-        try:
-            lock_file.close()
-            try:
-                os.remove(os.path.join(tempfile.gettempdir(), 'bot.lock'))
-            except:
-                pass
-        except Exception as e:
-            logger.warning(f"Error releasing lock: {str(e)}")
-
-def cleanup():
-    """Cleanup function to be called on exit."""
-    release_lock()
-    if bot_instance:
-        try:
-            bot_instance.stop()
-        except:
-            pass
-
-# Register cleanup function
-atexit.register(cleanup)
 
 @app.route('/')
 def home():
@@ -605,11 +556,6 @@ def run_bot():
         logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
         return
 
-    # Try to acquire lock
-    if not acquire_lock():
-        logger.error("Another instance is already running")
-        return
-
     try:
         # Create the Updater and pass it your bot's token
         updater = Updater(token, use_context=True)
@@ -650,7 +596,11 @@ def run_bot():
     except Exception as e:
         logger.error(f"Critical error in bot: {str(e)}")
     finally:
-        cleanup()
+        if bot_instance:
+            try:
+                bot_instance.stop()
+            except:
+                pass
 
 def run_web_server():
     """Run the Flask web server."""
@@ -668,5 +618,9 @@ if __name__ == '__main__':
         run_bot()
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
-        cleanup()
+        if bot_instance:
+            try:
+                bot_instance.stop()
+            except:
+                pass
         sys.exit(0) 
