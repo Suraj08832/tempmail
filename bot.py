@@ -15,7 +15,6 @@ import tempfile
 import re
 import signal
 import socket
-import fcntl
 import errno
 
 # Load environment variables
@@ -54,29 +53,42 @@ SPAM_KEYWORDS = [
 ]
 
 def acquire_lock():
-    """Acquire a lock to prevent multiple instances using fcntl."""
+    """Acquire a lock to prevent multiple instances using a simple file-based approach."""
     global lock_file, lock_fd
     try:
         lock_path = os.path.join(tempfile.gettempdir(), 'tempmail_bot.lock')
+        # Try to create the lock file
+        if os.path.exists(lock_path):
+            # Check if the process that created the lock is still running
+            try:
+                with open(lock_path, 'r') as f:
+                    pid = int(f.read().strip())
+                # Try to send a signal to the process
+                os.kill(pid, 0)
+                logger.error("Another instance is already running")
+                return False
+            except (ValueError, ProcessLookupError):
+                # Process is not running, we can take the lock
+                pass
+        
+        # Create or update the lock file with our PID
         lock_fd = open(lock_path, 'w')
-        fcntl.lockf(lock_fd, fcntl.F_TLOCK, 0)
+        lock_fd.write(str(os.getpid()))
+        lock_fd.flush()
         lock_file = lock_path
         return True
-    except IOError as e:
-        if e.errno == errno.EACCES or e.errno == errno.EAGAIN:
-            logger.error("Another instance is already running")
-            return False
-        raise
+    except Exception as e:
+        logger.error(f"Error acquiring lock: {str(e)}")
+        return False
 
 def release_lock():
     """Release the lock file."""
     global lock_file, lock_fd
     if lock_fd:
         try:
-            fcntl.lockf(lock_fd, fcntl.F_ULOCK, 0)
             lock_fd.close()
         except Exception as e:
-            logger.error(f"Error releasing lock: {str(e)}")
+            logger.error(f"Error closing lock file: {str(e)}")
     if lock_file and os.path.exists(lock_file):
         try:
             os.remove(lock_file)
