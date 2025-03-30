@@ -39,6 +39,8 @@ app = Flask(__name__)
 bot_instance = None
 user_sessions = {}
 is_shutting_down = False
+last_response_time = datetime.now()
+last_health_check = datetime.now()
 
 # Spam keywords (can be expanded)
 SPAM_KEYWORDS = [
@@ -67,13 +69,33 @@ def is_spam(text):
     text = text.lower()
     return any(keyword in text for keyword in SPAM_KEYWORDS)
 
+def update_last_response():
+    """Update the last response time."""
+    global last_response_time
+    last_response_time = datetime.now()
+
 @app.route('/')
 def home():
     return "Temporary Telegram Bot API is running! 🚀"
 
 @app.route('/health')
 def health_check():
-    return "OK", 200
+    """Health check endpoint."""
+    global last_response_time, last_health_check
+    last_health_check = datetime.now()
+    
+    # Check if bot has responded in the last 5 minutes
+    time_since_last_response = (datetime.now() - last_response_time).total_seconds()
+    is_healthy = time_since_last_response < 300  # 5 minutes = 300 seconds
+    
+    if not is_healthy:
+        logger.warning(f"Health check failed: No response for {time_since_last_response} seconds")
+    
+    return jsonify({
+        "status": "healthy" if is_healthy else "unhealthy",
+        "last_response": last_response_time.isoformat(),
+        "time_since_last_response": time_since_last_response
+    })
 
 @app.route('/api/newmail', methods=['POST'])
 def api_newmail():
@@ -140,6 +162,7 @@ def api_check_inbox(session_id):
 
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
+    update_last_response()
     welcome_message = (
         "👋 Welcome to Temporary Telegram Bot!\n\n"
         "This bot helps you create and manage temporary email addresses.\n\n"
@@ -157,6 +180,7 @@ def start(update: Update, context: CallbackContext):
 
 def help_command(update: Update, context: CallbackContext):
     """Send a message when the command /help is issued."""
+    update_last_response()
     help_message = (
         "📧 Temporary Telegram Bot Help\n\n"
         "Commands:\n"
@@ -554,6 +578,7 @@ def button_callback(update: Update, context: CallbackContext):
 def error_handler(update: Update, context: CallbackContext) -> None:
     """Handle errors in the telegram bot."""
     logger.error(f"Update {update} caused error: {context.error}")
+    update_last_response()  # Update last response time even on errors
     
     if isinstance(context.error, Conflict):
         logger.warning("Conflict detected - another bot instance might be running")
