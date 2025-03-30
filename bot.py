@@ -65,7 +65,7 @@ def is_spam(text):
 
 @app.route('/')
 def home():
-    return "DropMail Bot API is running! 🚀"
+    return "Temporary Telegram Bot API is running! 🚀"
 
 @app.route('/health')
 def health_check():
@@ -137,7 +137,7 @@ def api_check_inbox(session_id):
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
     welcome_message = (
-        "👋 Welcome to DropMail Bot!\n\n"
+        "👋 Welcome to Temporary Telegram Bot!\n\n"
         "This bot helps you create and manage temporary email addresses.\n\n"
         "Commands:\n"
         "/newmail - Generate a new temporary email address\n"
@@ -154,7 +154,7 @@ def start(update: Update, context: CallbackContext):
 def help_command(update: Update, context: CallbackContext):
     """Send a message when the command /help is issued."""
     help_message = (
-        "📧 DropMail Bot Help\n\n"
+        "📧 Temporary Telegram Bot Help\n\n"
         "Commands:\n"
         "/newmail - Generate a new temporary email address\n"
         "/current - Show current email address\n"
