@@ -12,6 +12,7 @@ import threading
 import sys
 import fcntl
 import atexit
+import tempfile
 
 # Load environment variables
 load_dotenv()
@@ -37,22 +38,28 @@ def acquire_lock():
     """Acquire a lock file to ensure only one instance runs."""
     global lock_file
     try:
-        lock_file = open('/tmp/bot.lock', 'w')
-        fcntl.lockf(lock_file, fcntl.F_EXLC)
+        # Use tempfile to get a system-appropriate temporary directory
+        lock_path = os.path.join(tempfile.gettempdir(), 'bot.lock')
+        lock_file = open(lock_path, 'w')
+        fcntl.lockf(lock_file, fcntl.F_EXLCK)
         return True
-    except IOError:
+    except (IOError, AttributeError) as e:
+        logger.warning(f"Could not acquire lock: {str(e)}")
         return False
 
 def release_lock():
     """Release the lock file."""
     global lock_file
     if lock_file:
-        fcntl.lockf(lock_file, fcntl.F_UNLC)
-        lock_file.close()
         try:
-            os.remove('/tmp/bot.lock')
-        except:
-            pass
+            fcntl.lockf(lock_file, fcntl.F_UNLCK)
+            lock_file.close()
+            try:
+                os.remove(os.path.join(tempfile.gettempdir(), 'bot.lock'))
+            except:
+                pass
+        except Exception as e:
+            logger.warning(f"Error releasing lock: {str(e)}")
 
 def cleanup():
     """Cleanup function to be called on exit."""
