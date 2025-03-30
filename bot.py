@@ -415,10 +415,10 @@ def run_web_server():
     app.run(host='0.0.0.0', port=port)
 
 if __name__ == '__main__':
-    # Start the bot in a separate thread
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
+    # Start the web server in a separate thread
+    web_thread = threading.Thread(target=run_web_server)
+    web_thread.daemon = True
+    web_thread.start()
     
-    # Run the web server in the main thread
-    run_web_server() 
+    # Run the bot in the main thread
+    run_bot() 
