@@ -362,41 +362,40 @@ def button_callback(update: Update, context: CallbackContext):
 
 def run_bot():
     """Run the Telegram bot."""
-    while True:  # Outer loop for continuous operation
-        try:
-            # Get the token from environment variable
-            token = os.getenv("TELEGRAM_BOT_TOKEN")
-            if not token:
-                logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
-                time.sleep(60)  # Wait before retrying
-                continue
+    # Get the token from environment variable
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
+        return
 
-            # Create the Updater and pass it your bot's token
-            updater = Updater(token, use_context=True)
+    try:
+        # Create the Updater and pass it your bot's token
+        updater = Updater(token, use_context=True)
 
-            # Get the dispatcher to register handlers
-            dispatcher = updater.dispatcher
+        # Get the dispatcher to register handlers
+        dispatcher = updater.dispatcher
 
-            # Add command handlers
-            dispatcher.add_handler(CommandHandler("start", start))
-            dispatcher.add_handler(CommandHandler("help", help_command))
-            dispatcher.add_handler(CommandHandler("newmail", newmail))
-            dispatcher.add_handler(CommandHandler("current", current))
-            dispatcher.add_handler(CommandHandler("delete", delete_session))
-            dispatcher.add_handler(CommandHandler("stats", stats))
-            dispatcher.add_handler(CommandHandler("forward", forward))
-            dispatcher.add_handler(CallbackQueryHandler(button_callback))
+        # Add command handlers
+        dispatcher.add_handler(CommandHandler("start", start))
+        dispatcher.add_handler(CommandHandler("help", help_command))
+        dispatcher.add_handler(CommandHandler("newmail", newmail))
+        dispatcher.add_handler(CommandHandler("current", current))
+        dispatcher.add_handler(CommandHandler("delete", delete_session))
+        dispatcher.add_handler(CommandHandler("stats", stats))
+        dispatcher.add_handler(CommandHandler("forward", forward))
+        dispatcher.add_handler(CallbackQueryHandler(button_callback))
 
-            # Start the Bot
-            updater.start_polling(drop_pending_updates=True)
-            logger.info("Bot started successfully!")
-            
-            # Run the bot until you press Ctrl-C
-            updater.idle()
-            
-        except Exception as e:
-            logger.error(f"Critical error in bot: {str(e)}")
-            time.sleep(5)  # Wait before retrying
+        # Start the Bot
+        updater.start_polling(drop_pending_updates=True)
+        logger.info("Bot started successfully!")
+        
+        # Run the bot until you press Ctrl-C
+        updater.idle()
+        
+    except Exception as e:
+        logger.error(f"Critical error in bot: {str(e)}")
+        # Don't restart the bot on error, let Render handle it
+        raise
 
 if __name__ == '__main__':
     run_bot() 
