@@ -381,40 +381,50 @@ def run_bot():
         logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
         return
 
-    try:
-        # Create the Updater and pass it your bot's token
-        updater = Updater(token, use_context=True)
+    while True:  # Outer loop for continuous operation
+        try:
+            # Create the Updater and pass it your bot's token
+            updater = Updater(token, use_context=True)
 
-        # Get the dispatcher to register handlers
-        dispatcher = updater.dispatcher
+            # Get the dispatcher to register handlers
+            dispatcher = updater.dispatcher
 
-        # Add command handlers
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(CommandHandler("help", help_command))
-        dispatcher.add_handler(CommandHandler("newmail", newmail))
-        dispatcher.add_handler(CommandHandler("current", current))
-        dispatcher.add_handler(CommandHandler("delete", delete_session))
-        dispatcher.add_handler(CommandHandler("stats", stats))
-        dispatcher.add_handler(CommandHandler("forward", forward))
-        dispatcher.add_handler(CallbackQueryHandler(button_callback))
+            # Add command handlers
+            dispatcher.add_handler(CommandHandler("start", start))
+            dispatcher.add_handler(CommandHandler("help", help_command))
+            dispatcher.add_handler(CommandHandler("newmail", newmail))
+            dispatcher.add_handler(CommandHandler("current", current))
+            dispatcher.add_handler(CommandHandler("delete", delete_session))
+            dispatcher.add_handler(CommandHandler("stats", stats))
+            dispatcher.add_handler(CommandHandler("forward", forward))
+            dispatcher.add_handler(CallbackQueryHandler(button_callback))
 
-        # Start the Bot
-        updater.start_polling(drop_pending_updates=True)
-        logger.info("Bot started successfully!")
-        
-        # Keep the bot running
-        while True:
+            # Start the Bot
+            updater.start_polling(drop_pending_updates=True)
+            logger.info("Bot started successfully!")
+            
+            # Keep the bot running
+            while True:
+                try:
+                    # Test bot connection every 30 seconds
+                    updater.bot.get_me()
+                    time.sleep(30)
+                except Exception as e:
+                    logger.error(f"Error in bot loop: {str(e)}")
+                    break
+                    
+            # Stop the bot before restarting
             try:
-                # Test bot connection every 30 seconds
-                updater.bot.get_me()
-                time.sleep(30)
+                updater.stop()
             except Exception as e:
-                logger.error(f"Error in bot loop: {str(e)}")
-                break
+                logger.error(f"Error stopping bot: {str(e)}")
                 
-    except Exception as e:
-        logger.error(f"Critical error in bot: {str(e)}")
-        raise
+        except Exception as e:
+            logger.error(f"Critical error in bot: {str(e)}")
+            
+        # Wait before trying to restart
+        logger.info("Bot stopped, attempting to restart in 5 seconds...")
+        time.sleep(5)
 
 def run_web_server():
     """Run the Flask web server."""
