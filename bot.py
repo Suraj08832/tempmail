@@ -551,14 +551,14 @@ def run_bot():
     global bot_instance
     
     # Get the token from environment variable
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "8132711759:AAHUIrEfsDo0bID_4LKBr9x9qIYyUcPk3lQ")
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
         return
 
     try:
         # Create the Updater and pass it your bot's token
-        updater = Updater(token, use_context=True)
+        updater = Updater(token=token, use_context=True)
         bot_instance = updater
 
         # Get the dispatcher to register handlers
