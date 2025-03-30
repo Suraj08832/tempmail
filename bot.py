@@ -467,11 +467,6 @@ def main():
 if __name__ == '__main__':
     # Use Gunicorn for production
     if os.getenv('FLASK_ENV') == 'production':
-        # Start the bot in a separate thread
-        bot_thread = threading.Thread(target=run_bot)
-        bot_thread.daemon = True
-        bot_thread.start()
-        
         # Run Gunicorn with our config
         import gunicorn.app.baseapp
         gunicorn.app.baseapp.Application().run()

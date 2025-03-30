@@ -1,4 +1,11 @@
 import multiprocessing
+import threading
+from bot import run_bot
+
+# Start the bot thread
+bot_thread = threading.Thread(target=run_bot)
+bot_thread.daemon = True
+bot_thread.start()
 
 # Server socket
 bind = "0.0.0.0:8000"
