@@ -447,13 +447,13 @@ def run_bot():
 
 def main():
     """Start both the web server and the bot."""
+    # Get port from environment variable or use default
+    port = int(os.getenv("PORT", 8000))
+    
     # Start the bot in a separate thread
     bot_thread = threading.Thread(target=run_bot)
     bot_thread.daemon = True
     bot_thread.start()
-    
-    # Get port from environment variable or use default
-    port = int(os.getenv("PORT", 8000))
     
     # Start the Flask app with production settings
     app.run(
@@ -467,6 +467,12 @@ def main():
 if __name__ == '__main__':
     # Use Gunicorn for production
     if os.getenv('FLASK_ENV') == 'production':
+        # Start the bot in a separate thread
+        bot_thread = threading.Thread(target=run_bot)
+        bot_thread.daemon = True
+        bot_thread.start()
+        
+        # Run Gunicorn
         import gunicorn.app.baseapp
         gunicorn.app.baseapp.Application().run()
     else:
