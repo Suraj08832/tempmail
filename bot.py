@@ -13,6 +13,7 @@ import sys
 import atexit
 import tempfile
 import re
+import signal
 
 # Load environment variables
 load_dotenv()
@@ -33,12 +34,29 @@ app = Flask(__name__)
 # Global variables
 bot_instance = None
 user_sessions = {}
+is_shutting_down = False
 
 # Spam keywords (can be expanded)
 SPAM_KEYWORDS = [
     'lottery', 'winner', 'inheritance', 'urgent', 'million',
     'bank transfer', 'account suspended', 'verify account'
 ]
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    global is_shutting_down
+    logger.info("Received shutdown signal. Cleaning up...")
+    is_shutting_down = True
+    if bot_instance:
+        try:
+            bot_instance.stop()
+        except:
+            pass
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 def is_spam(text):
     """Check if text contains spam keywords."""
@@ -548,7 +566,7 @@ def error_handler(update: Update, context: CallbackContext) -> None:
 
 def run_bot():
     """Run the Telegram bot."""
-    global bot_instance
+    global bot_instance, is_shutting_down
     
     # Get the token from environment variable
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -584,14 +602,16 @@ def run_bot():
         logger.info("Bot started successfully!")
         
         # Keep the bot running
-        while True:
+        while not is_shutting_down:
             try:
                 # Test bot connection every 30 seconds
                 updater.bot.get_me()
                 time.sleep(30)
             except Exception as e:
                 logger.error(f"Error in bot loop: {str(e)}")
-                break
+                if not is_shutting_down:
+                    time.sleep(5)  # Wait before retrying
+                continue
                 
     except Exception as e:
         logger.error(f"Critical error in bot: {str(e)}")

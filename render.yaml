@@ -3,10 +3,15 @@ services:
     name: dropmail-bot
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn bot:app -c gunicorn_config.py
+    startCommand: python bot.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
         value: 8132711759:AAHUIrEfsDo0bID_4LKBr9x9qIYyUcPk3lQ
     healthCheckPath: /health
-    autoDeploy: true 
+    autoDeploy: true
+    plan: free
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1 
