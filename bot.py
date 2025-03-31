@@ -1015,6 +1015,57 @@ def monitor_bot():
             logger.error(f"Error in monitor_bot: {str(e)}")
             time.sleep(MONITORING_INTERVAL)
 
+def run_bot():
+    """Initialize and run the Telegram bot."""
+    global bot_instance
+    
+    try:
+        # Get the bot token from environment variables
+        token = os.getenv('TELEGRAM_BOT_TOKEN')
+        if not token:
+            raise ValueError("TELEGRAM_BOT_TOKEN environment variable is not set")
+            
+        # Initialize the bot
+        bot_instance = Updater(token, use_context=True)
+        
+        # Get the dispatcher to register handlers
+        dispatcher = bot_instance.dispatcher
+        
+        # Register command handlers
+        dispatcher.add_handler(CommandHandler("start", start))
+        dispatcher.add_handler(CommandHandler("help", help_command))
+        dispatcher.add_handler(CommandHandler("newmail", newmail))
+        dispatcher.add_handler(CommandHandler("current", current))
+        dispatcher.add_handler(CommandHandler("delete", delete_session))
+        dispatcher.add_handler(CommandHandler("stats", stats))
+        dispatcher.add_handler(CommandHandler("forward", forward))
+        dispatcher.add_handler(CommandHandler("extend", extend_lifetime))
+        dispatcher.add_handler(CommandHandler("privacy", privacy_tips))
+        
+        # Register callback query handler
+        dispatcher.add_handler(CallbackQueryHandler(button_callback))
+        
+        # Register error handler
+        dispatcher.add_error_handler(error_handler)
+        
+        # Start the bot
+        logger.info("Starting bot...")
+        bot_instance.start_polling()
+        logger.info("Bot started successfully")
+        
+        # Run the bot until the shutdown signal is received
+        bot_instance.idle()
+        
+    except Exception as e:
+        logger.error(f"Error in run_bot: {str(e)}")
+        logger.exception("Full traceback:")
+        if bot_instance:
+            try:
+                bot_instance.stop()
+            except Exception as stop_error:
+                logger.error(f"Error stopping bot: {str(stop_error)}")
+        raise
+
 if __name__ == '__main__':
     logger.info("Starting application...")
     
