@@ -1128,8 +1128,13 @@ def run_bot():
         if not token:
             raise ValueError("TELEGRAM_BOT_TOKEN environment variable is not set")
             
-        # Initialize the bot
-        bot_instance = Updater(token, use_context=True)
+        # Initialize the bot with error handling
+        try:
+            bot_instance = Updater(token, use_context=True)
+            logger.info("Bot instance initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize bot: {str(e)}")
+            raise
         
         # Get the dispatcher to register handlers
         dispatcher = bot_instance.dispatcher
@@ -1151,13 +1156,23 @@ def run_bot():
         # Register error handler
         dispatcher.add_error_handler(error_handler)
         
-        # Start the bot
-        logger.info("Starting bot...")
-        bot_instance.start_polling()
+        # Start the bot with error handling
+        try:
+            logger.info("Starting bot polling...")
+            bot_instance.start_polling(drop_pending_updates=True)
+            logger.info("Bot polling started successfully")
+        except Exception as e:
+            logger.error(f"Failed to start bot polling: {str(e)}")
+            raise
         
         # Add welcome message job
-        job_queue = bot_instance.job_queue
-        job_queue.run_repeating(send_welcome_message, interval=WELCOME_INTERVAL, first=WELCOME_INTERVAL)
+        try:
+            job_queue = bot_instance.job_queue
+            job_queue.run_repeating(send_welcome_message, interval=WELCOME_INTERVAL, first=WELCOME_INTERVAL)
+            logger.info("Welcome message job scheduled successfully")
+        except Exception as e:
+            logger.error(f"Failed to schedule welcome message job: {str(e)}")
+            # Don't raise here, as this is not critical
         
         logger.info("Bot started successfully")
         
@@ -1170,11 +1185,13 @@ def run_bot():
             time.sleep(1)
             
         # Cleanup when shutdown is requested
+        logger.info("Shutdown requested, cleaning up...")
         bot_instance.stop()
         time.sleep(2)
         bot_instance.dispatcher.stop()
         if hasattr(bot_instance, 'job_queue'):
             bot_instance.job_queue.stop()
+        logger.info("Bot cleanup completed")
             
     except Exception as e:
         logger.error(f"Error in run_bot: {str(e)}")
@@ -1206,21 +1223,33 @@ if __name__ == '__main__':
         web_process.start()
         logger.info("Web server process started")
         
+        # Wait for web server to start
+        time.sleep(5)
+        
         # Start monitoring thread
         monitor_thread = threading.Thread(target=monitor_bot)
         monitor_thread.daemon = True
         monitor_thread.start()
         logger.info("Monitoring thread started")
         
-        # Run the bot in the main thread
+        # Run the bot in the main thread with retry mechanism
+        retry_count = 0
+        max_retries = 3
+        retry_delay = 5
+        
         while not shutdown_event.is_set():
             try:
                 run_bot()
             except Exception as e:
                 logger.error(f"Error in main loop: {str(e)}")
-                if not is_restarting:
-                    time.sleep(RESTART_DELAY)
+                if not is_restarting and retry_count < max_retries:
+                    retry_count += 1
+                    logger.info(f"Retrying bot start (attempt {retry_count}/{max_retries})")
+                    time.sleep(retry_delay)
                     continue
+                elif not is_restarting:
+                    restart_bot()
+                    break
                 else:
                     break
                     
