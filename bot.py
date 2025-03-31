@@ -798,8 +798,19 @@ def run_web_server():
         'preload_app': True,  # Preload the application
         'worker_connections': 1000,  # Maximum number of simultaneous connections
         'backlog': 2048,  # Maximum number of pending connections
-        'max_worker_lifetime': 3600,  # Restart workers after 1 hour
-        'reload': False  # Disable auto-reload in production
+        'reload': False,  # Disable auto-reload in production
+        'daemon': False,  # Don't daemonize the process
+        'pidfile': None,  # Don't use a PID file
+        'umask': 0,  # Set umask to 0
+        'user': None,  # Don't change user
+        'group': None,  # Don't change group
+        'tmp_upload_dir': None,  # Use system default
+        'forwarded_allow_ips': '*',  # Allow all forwarded IPs
+        'secure_scheme_headers': {
+            'X-FORWARDED-PROTOCOL': 'ssl',
+            'X-FORWARDED-PROTO': 'https',
+            'X-FORWARDED-SSL': 'on'
+        }
     }
     
     try:
