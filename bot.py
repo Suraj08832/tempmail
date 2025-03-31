@@ -348,6 +348,45 @@ def api_check_inbox(session_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/monitor/status')
+def monitor_status():
+    """Health check endpoint for monitoring."""
+    global last_response_time, last_health_check, bot_instance
+    last_health_check = datetime.now()
+    
+    try:
+        # Check if bot has responded in the last 3 minutes
+        time_since_last_response = (datetime.now() - last_response_time).total_seconds()
+        is_healthy = time_since_last_response < 180  # 3 minutes = 180 seconds
+        
+        # Check if bot instance is running
+        bot_running = bot_instance is not None and not is_shutting_down
+        
+        # Check if bot is responding
+        if bot_running:
+            try:
+                bot_instance.bot.get_me()
+            except Exception as e:
+                logger.error(f"Bot health check failed: {str(e)}")
+                is_healthy = False
+        
+        if not is_healthy:
+            logger.warning(f"Health check failed: No response for {time_since_last_response} seconds")
+        
+        return jsonify({
+            "status": "healthy" if is_healthy else "unhealthy",
+            "last_response": last_response_time.isoformat(),
+            "time_since_last_response": time_since_last_response,
+            "bot_running": bot_running,
+            "health_check_queue_size": health_check_queue.qsize()
+        })
+    except Exception as e:
+        logger.error(f"Error in health check: {str(e)}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e)
+        }), 500
+
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
     update_last_response()
@@ -974,40 +1013,47 @@ def monitor_bot():
     
     while not shutdown_event.is_set():
         try:
-            # Check bot health
-            response = requests.get('http://localhost:10000/monitor/status')
-            status_data = response.json()
+            # Wait for web server to start
+            time.sleep(5)
             
-            if status_data.get('status') == 'unhealthy':
-                logger.warning("Bot health check failed, attempting restart...")
+            # Check bot health
+            try:
+                response = requests.get('http://localhost:10000/monitor/status', timeout=5)
+                status_data = response.json()
                 
-                # Check if we've exceeded max restart attempts
-                if restart_count >= MAX_RESTART_ATTEMPTS:
-                    logger.error("Max restart attempts reached. Manual intervention required.")
-                    # Here you could add notification logic (email, SMS, etc.)
-                    time.sleep(MONITORING_INTERVAL)
-                    continue
-                
-                # Attempt restart
-                last_restart_attempt = datetime.now()
-                restart_count += 1
-                
-                if bot_instance:
-                    try:
-                        # Stop the bot gracefully
-                        bot_instance.stop()
-                        time.sleep(2)
-                        bot_instance.dispatcher.stop()
-                        if hasattr(bot_instance, 'job_queue'):
-                            bot_instance.job_queue.stop()
-                    except Exception as e:
-                        logger.error(f"Error stopping bot: {str(e)}")
-                
-                # Wait before restarting
-                time.sleep(RESTART_DELAY)
-                
-                # Restart the bot
-                run_bot()
+                if status_data.get('status') == 'unhealthy':
+                    logger.warning("Bot health check failed, attempting restart...")
+                    
+                    # Check if we've exceeded max restart attempts
+                    if restart_count >= MAX_RESTART_ATTEMPTS:
+                        logger.error("Max restart attempts reached. Manual intervention required.")
+                        time.sleep(MONITORING_INTERVAL)
+                        continue
+                    
+                    # Attempt restart
+                    last_restart_attempt = datetime.now()
+                    restart_count += 1
+                    
+                    if bot_instance:
+                        try:
+                            # Stop the bot gracefully
+                            bot_instance.stop()
+                            time.sleep(2)
+                            bot_instance.dispatcher.stop()
+                            if hasattr(bot_instance, 'job_queue'):
+                                bot_instance.job_queue.stop()
+                        except Exception as e:
+                            logger.error(f"Error stopping bot: {str(e)}")
+                    
+                    # Wait before restarting
+                    time.sleep(RESTART_DELAY)
+                    
+                    # Restart the bot
+                    run_bot()
+                    
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error checking bot health: {str(e)}")
+                time.sleep(5)
                 
             time.sleep(MONITORING_INTERVAL)
             
