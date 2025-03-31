@@ -19,6 +19,7 @@ import errno
 import threading
 import queue
 import psutil
+import json
 
 # Load environment variables
 load_dotenv()
@@ -57,6 +58,13 @@ SPAM_KEYWORDS = [
     'lottery', 'winner', 'inheritance', 'urgent', 'million',
     'bank transfer', 'account suspended', 'verify account'
 ]
+
+# Add these global variables after other globals
+MONITORING_INTERVAL = 60  # seconds
+MAX_RESTART_ATTEMPTS = 3
+RESTART_DELAY = 30  # seconds
+last_restart_attempt = None
+restart_count = 0
 
 def is_process_running(pid):
     """Check if a process is still running."""
@@ -920,6 +928,82 @@ def run_bot():
                 except Exception as e:
                     logger.error(f"Error stopping bot: {str(e)}")
 
+@app.route('/monitor/status')
+def monitor_status():
+    """Endpoint to check bot status and health."""
+    global last_response_time, last_health_check, restart_count
+    
+    try:
+        # Check if bot has responded in the last 3 minutes
+        time_since_last_response = (datetime.now() - last_response_time).total_seconds()
+        is_healthy = time_since_last_response < 180  # 3 minutes = 180 seconds
+        
+        # Check health check queue
+        try:
+            recent_health = health_check_queue.get_nowait()
+            is_healthy = is_healthy and recent_health
+        except queue.Empty:
+            pass
+        
+        return jsonify({
+            "status": "healthy" if is_healthy else "unhealthy",
+            "last_response": last_response_time.isoformat(),
+            "time_since_last_response": time_since_last_response,
+            "bot_running": bot_instance is not None and not is_shutting_down,
+            "restart_count": restart_count,
+            "last_restart": last_restart_attempt.isoformat() if last_restart_attempt else None
+        })
+    except Exception as e:
+        logger.error(f"Error in monitor_status: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+def monitor_bot():
+    """Background thread to monitor bot health and auto-restart if needed."""
+    global last_restart_attempt, restart_count
+    
+    while not shutdown_event.is_set():
+        try:
+            # Check bot health
+            response = requests.get('http://localhost:10000/monitor/status')
+            status_data = response.json()
+            
+            if status_data.get('status') == 'unhealthy':
+                logger.warning("Bot health check failed, attempting restart...")
+                
+                # Check if we've exceeded max restart attempts
+                if restart_count >= MAX_RESTART_ATTEMPTS:
+                    logger.error("Max restart attempts reached. Manual intervention required.")
+                    # Here you could add notification logic (email, SMS, etc.)
+                    time.sleep(MONITORING_INTERVAL)
+                    continue
+                
+                # Attempt restart
+                last_restart_attempt = datetime.now()
+                restart_count += 1
+                
+                if bot_instance:
+                    try:
+                        # Stop the bot gracefully
+                        bot_instance.stop()
+                        time.sleep(2)
+                        bot_instance.dispatcher.stop()
+                        if hasattr(bot_instance, 'job_queue'):
+                            bot_instance.job_queue.stop()
+                    except Exception as e:
+                        logger.error(f"Error stopping bot: {str(e)}")
+                
+                # Wait before restarting
+                time.sleep(RESTART_DELAY)
+                
+                # Restart the bot
+                run_bot()
+                
+            time.sleep(MONITORING_INTERVAL)
+            
+        except Exception as e:
+            logger.error(f"Error in monitor_bot: {str(e)}")
+            time.sleep(MONITORING_INTERVAL)
+
 if __name__ == '__main__':
     logger.info("Starting application...")
     
@@ -935,6 +1019,12 @@ if __name__ == '__main__':
         web_process.start()
         logger.info("Web server process started")
         
+        # Start monitoring thread
+        monitor_thread = threading.Thread(target=monitor_bot)
+        monitor_thread.daemon = True
+        monitor_thread.start()
+        logger.info("Monitoring thread started")
+        
         # Run the bot in the main process
         try:
             run_bot()
@@ -942,13 +1032,9 @@ if __name__ == '__main__':
             logger.info("Bot stopped by user")
             if bot_instance:
                 try:
-                    # Stop the updater first
                     bot_instance.stop()
-                    # Wait for any pending updates to be processed
                     time.sleep(2)
-                    # Stop the dispatcher
                     bot_instance.dispatcher.stop()
-                    # Stop the job queue if it exists
                     if hasattr(bot_instance, 'job_queue'):
                         bot_instance.job_queue.stop()
                 except Exception as e:

@@ -3,18 +3,34 @@ services:
     name: tempmail-bot
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
+    startCommand: gunicorn bot:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: PORT
         value: 10000
-    healthCheckPath: /health
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+    healthCheckPath: /monitor/status
     healthCheckTimeout: 180
     healthCheckInterval: 60
     autoDeploy: true
+    monitoring:
+      enabled: true
+      checkInterval: 60s
+      timeout: 30s
+      maxRetries: 3
+      alertChannels:
+        - type: email
+          recipients:
+            - your-email@example.com  # Replace with your email
     plan: free
     disk:
       name: data
       mountPath: /data
-      sizeGB: 1 
+      sizeGB: 1
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+      targetMemoryPercent: 80
+      targetCPUPercent: 80 
