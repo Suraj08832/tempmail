@@ -257,33 +257,78 @@ def health_check():
     last_health_check = datetime.now()
     
     try:
-        # Check if bot has responded in the last 3 minutes
-        time_since_last_response = (datetime.now() - last_response_time).total_seconds()
-        is_healthy = time_since_last_response < 180  # 3 minutes = 180 seconds
+        # Check if bot is running
+        if not bot_instance or not bot_instance.is_running:
+            return jsonify({
+                'status': 'unhealthy',
+                'message': 'Bot is not running',
+                'timestamp': datetime.now().isoformat()
+            }), 503
         
-        # Check health check queue
+        # Check if bot is responding to commands
         try:
-            recent_health = health_check_queue.get_nowait()
-            is_healthy = is_healthy and recent_health
-        except queue.Empty:
-            pass
+            # Get bot info to verify connection
+            bot_info = bot_instance.bot.get_me()
+            if not bot_info:
+                return jsonify({
+                    'status': 'unhealthy',
+                    'message': 'Bot is not responding to API calls',
+                    'timestamp': datetime.now().isoformat()
+                }), 503
+        except Exception as e:
+            logger.error(f"Error checking bot API: {str(e)}")
+            return jsonify({
+                'status': 'unhealthy',
+                'message': f'Bot API error: {str(e)}',
+                'timestamp': datetime.now().isoformat()
+            }), 503
         
-        if not is_healthy:
-            logger.warning(f"Health check failed: No response for {time_since_last_response} seconds")
+        # Check if dispatcher is running
+        if not bot_instance.dispatcher or not bot_instance.dispatcher.is_running:
+            return jsonify({
+                'status': 'unhealthy',
+                'message': 'Bot dispatcher is not running',
+                'timestamp': datetime.now().isoformat()
+            }), 503
         
+        # Check if job queue is running
+        if hasattr(bot_instance, 'job_queue') and not bot_instance.job_queue.is_running:
+            return jsonify({
+                'status': 'unhealthy',
+                'message': 'Bot job queue is not running',
+                'timestamp': datetime.now().isoformat()
+            }), 503
+        
+        # Check if bot has responded recently
+        time_since_last_response = (datetime.now() - last_response_time).total_seconds()
+        if time_since_last_response > 180:  # 3 minutes
+            return jsonify({
+                'status': 'unhealthy',
+                'message': f'No response for {time_since_last_response} seconds',
+                'timestamp': datetime.now().isoformat()
+            }), 503
+        
+        # If all checks pass, return healthy status
         return jsonify({
-            "status": "healthy" if is_healthy else "unhealthy",
-            "last_response": last_response_time.isoformat(),
-            "time_since_last_response": time_since_last_response,
-            "bot_running": bot_instance is not None and not is_shutting_down,
-            "health_check_queue_size": health_check_queue.qsize()
-        })
+            'status': 'healthy',
+            'message': 'Bot is running normally',
+            'timestamp': datetime.now().isoformat(),
+            'last_response': last_response_time.isoformat(),
+            'time_since_last_response': time_since_last_response,
+            'bot_info': {
+                'username': bot_info.username,
+                'id': bot_info.id,
+                'is_bot': bot_info.is_bot
+            }
+        }), 200
+        
     except Exception as e:
         logger.error(f"Error in health check: {str(e)}")
         return jsonify({
-            "status": "unhealthy",
-            "error": str(e)
-        }), 500
+            'status': 'unhealthy',
+            'message': f'Health check error: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 503
 
 @app.route('/api/newmail', methods=['POST'])
 def api_newmail():
@@ -347,72 +392,6 @@ def api_check_inbox(session_id):
         return jsonify({"emails": data["data"]["session"]["mails"]})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@app.route('/monitor/status')
-def health_check():
-    """Health check endpoint for monitoring."""
-    try:
-        # Check if bot is running
-        if not bot_instance or not bot_instance.is_running:
-            return jsonify({
-                'status': 'unhealthy',
-                'message': 'Bot is not running',
-                'timestamp': datetime.now().isoformat()
-            }), 503
-        
-        # Check if bot is responding to commands
-        try:
-            # Get bot info to verify connection
-            bot_info = bot_instance.bot.get_me()
-            if not bot_info:
-                return jsonify({
-                    'status': 'unhealthy',
-                    'message': 'Bot is not responding to API calls',
-                    'timestamp': datetime.now().isoformat()
-                }), 503
-        except Exception as e:
-            logger.error(f"Error checking bot API: {str(e)}")
-            return jsonify({
-                'status': 'unhealthy',
-                'message': f'Bot API error: {str(e)}',
-                'timestamp': datetime.now().isoformat()
-            }), 503
-        
-        # Check if dispatcher is running
-        if not bot_instance.dispatcher or not bot_instance.dispatcher.is_running:
-            return jsonify({
-                'status': 'unhealthy',
-                'message': 'Bot dispatcher is not running',
-                'timestamp': datetime.now().isoformat()
-            }), 503
-        
-        # Check if job queue is running
-        if hasattr(bot_instance, 'job_queue') and not bot_instance.job_queue.is_running:
-            return jsonify({
-                'status': 'unhealthy',
-                'message': 'Bot job queue is not running',
-                'timestamp': datetime.now().isoformat()
-            }), 503
-        
-        # If all checks pass, return healthy status
-        return jsonify({
-            'status': 'healthy',
-            'message': 'Bot is running normally',
-            'timestamp': datetime.now().isoformat(),
-            'bot_info': {
-                'username': bot_info.username,
-                'id': bot_info.id,
-                'is_bot': bot_info.is_bot
-            }
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Error in health check: {str(e)}")
-        return jsonify({
-            'status': 'unhealthy',
-            'message': f'Health check error: {str(e)}',
-            'timestamp': datetime.now().isoformat()
-        }), 503
 
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
@@ -1045,11 +1024,11 @@ def monitor_bot():
             
             # Check bot health
             try:
-                response = requests.get('http://localhost:10000/monitor/status', timeout=5)
+                response = requests.get('http://localhost:10000/health', timeout=5)
                 status_data = response.json()
                 
                 if status_data.get('status') == 'unhealthy':
-                    logger.warning("Bot health check failed, attempting restart...")
+                    logger.warning(f"Bot health check failed: {status_data.get('message')}")
                     
                     # Check if we've exceeded max restart attempts
                     if restart_count >= MAX_RESTART_ATTEMPTS:
