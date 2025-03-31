@@ -158,7 +158,8 @@ def health_check():
     return jsonify({
         "status": "healthy" if is_healthy else "unhealthy",
         "last_response": last_response_time.isoformat(),
-        "time_since_last_response": time_since_last_response
+        "time_since_last_response": time_since_last_response,
+        "bot_running": bot_instance is not None and not is_shutting_down
     })
 
 @app.route('/api/newmail', methods=['POST'])
@@ -712,7 +713,8 @@ def run_web_server():
         'graceful_timeout': 30,  # Give workers time to finish
         'keepalive': 5,  # Keep connections alive
         'max_requests': 1000,  # Restart workers after this many requests
-        'max_requests_jitter': 50  # Add jitter to prevent all workers restarting at once
+        'max_requests_jitter': 50,  # Add jitter to prevent all workers restarting at once
+        'worker_tmp_dir': '/dev/shm'  # Use shared memory for better performance
     }
     
     try:
