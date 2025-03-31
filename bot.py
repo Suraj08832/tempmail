@@ -73,6 +73,8 @@ SHUTDOWN_DELAY = 5
 is_restarting = False
 last_shutdown_attempt = None
 shutdown_count = 0
+WELCOME_INTERVAL = 600  # 10 minutes in seconds
+last_welcome_time = {}
 
 def is_process_running(pid):
     """Check if a process is still running."""
@@ -1062,6 +1064,42 @@ def monitor_bot():
             logger.error(f"Error in monitor_bot: {str(e)}")
             time.sleep(MONITORING_INTERVAL)
 
+def send_welcome_message(context: CallbackContext):
+    """Send welcome message to users every 10 minutes."""
+    global last_welcome_time
+    current_time = datetime.now()
+    
+    try:
+        # Get all active users from user_sessions
+        for user_id in user_sessions.keys():
+            # Check if we should send welcome message to this user
+            if user_id not in last_welcome_time or \
+               (current_time - last_welcome_time[user_id]).total_seconds() >= WELCOME_INTERVAL:
+                
+                welcome_message = (
+                    "👋 Welcome back to Temporary Telegram Bot!\n\n"
+                    "Here's a quick reminder of what you can do:\n"
+                    "• Use /newmail to get a new temporary email\n"
+                    "• Use /current to see your current email\n"
+                    "• Use /delete to remove your email session\n"
+                    "• Use /stats to see email statistics\n"
+                    "• Use /forward to set up email forwarding\n"
+                    "• Use /extend to extend email lifetime\n"
+                    "• Use /privacy to get privacy tips\n"
+                    "• Use /help for more information\n\n"
+                    "Need help? Just type /help anytime! 😊"
+                )
+                
+                try:
+                    context.bot.send_message(chat_id=user_id, text=welcome_message)
+                    last_welcome_time[user_id] = current_time
+                    logger.info(f"Sent welcome message to user {user_id}")
+                except Exception as e:
+                    logger.error(f"Error sending welcome message to user {user_id}: {str(e)}")
+                    
+    except Exception as e:
+        logger.error(f"Error in send_welcome_message: {str(e)}")
+
 def run_bot():
     """Initialize and run the Telegram bot."""
     global bot_instance
@@ -1098,6 +1136,11 @@ def run_bot():
         # Start the bot
         logger.info("Starting bot...")
         bot_instance.start_polling()
+        
+        # Add welcome message job
+        job_queue = bot_instance.job_queue
+        job_queue.run_repeating(send_welcome_message, interval=WELCOME_INTERVAL, first=WELCOME_INTERVAL)
+        
         logger.info("Bot started successfully")
         
         # Instead of using idle(), we'll use a loop with shutdown_event
