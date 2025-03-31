@@ -629,12 +629,20 @@ def error_handler(update: Update, context: CallbackContext) -> None:
     update_last_response()  # Update last response time even on errors
     
     if isinstance(context.error, Conflict):
-        logger.warning("Conflict detected - stopping bot to prevent multiple instances")
+        logger.warning("Conflict detected - cleaning up and restarting bot")
         if bot_instance:
             try:
+                # Stop the updater first
                 bot_instance.stop()
+                # Wait for any pending updates to be processed
+                time.sleep(2)
+                # Stop the dispatcher
+                bot_instance.dispatcher.stop()
+                # Stop the job queue if it exists
+                if hasattr(bot_instance, 'job_queue'):
+                    bot_instance.job_queue.stop()
             except Exception as e:
-                logger.error(f"Error stopping bot: {str(e)}")
+                logger.error(f"Error during bot cleanup: {str(e)}")
         time.sleep(5)  # Wait before restarting
         sys.exit(1)  # Exit to allow the process manager to restart
     elif isinstance(context.error, (TimedOut, NetworkError)):
@@ -749,7 +757,15 @@ def run_bot():
             if bot_instance:
                 try:
                     logger.info("Stopping bot...")
+                    # Stop the updater first
                     bot_instance.stop()
+                    # Wait for any pending updates to be processed
+                    time.sleep(2)
+                    # Stop the dispatcher
+                    bot_instance.dispatcher.stop()
+                    # Stop the job queue if it exists
+                    if hasattr(bot_instance, 'job_queue'):
+                        bot_instance.job_queue.stop()
                 except Exception as e:
                     logger.error(f"Error stopping bot: {str(e)}")
 
@@ -775,7 +791,15 @@ if __name__ == '__main__':
             logger.info("Bot stopped by user")
             if bot_instance:
                 try:
+                    # Stop the updater first
                     bot_instance.stop()
+                    # Wait for any pending updates to be processed
+                    time.sleep(2)
+                    # Stop the dispatcher
+                    bot_instance.dispatcher.stop()
+                    # Stop the job queue if it exists
+                    if hasattr(bot_instance, 'job_queue'):
+                        bot_instance.job_queue.stop()
                 except Exception as e:
                     logger.error(f"Error stopping bot: {str(e)}")
             sys.exit(0)
