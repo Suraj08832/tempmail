@@ -669,10 +669,9 @@ def run_web_server():
     logger.info(f"Starting web server on port {port}")
     
     # Use Gunicorn for production
-    import gunicorn.app.baseapp
-    from gunicorn.app.baseapp import BaseApplication
+    from gunicorn.app.wsgiapp import WSGIApplication
     
-    class StandaloneApplication(BaseApplication):
+    class StandaloneApplication(WSGIApplication):
         def __init__(self, app, options=None):
             self.options = options or {}
             self.application = app
