@@ -1048,8 +1048,9 @@ def monitor_bot():
                     # Wait before restarting
                     time.sleep(RESTART_DELAY)
                     
-                    # Restart the bot
-                    run_bot()
+                    # Instead of calling run_bot directly, set a flag to restart
+                    global should_restart
+                    should_restart = True
                     
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error checking bot health: {str(e)}")
@@ -1099,9 +1100,17 @@ def run_bot():
         bot_instance.start_polling()
         logger.info("Bot started successfully")
         
-        # Run the bot until the shutdown signal is received
-        bot_instance.idle()
-        
+        # Instead of using idle(), we'll use a loop with shutdown_event
+        while not shutdown_event.is_set():
+            time.sleep(1)
+            
+        # Cleanup when shutdown is requested
+        bot_instance.stop()
+        time.sleep(2)
+        bot_instance.dispatcher.stop()
+        if hasattr(bot_instance, 'job_queue'):
+            bot_instance.job_queue.stop()
+            
     except Exception as e:
         logger.error(f"Error in run_bot: {str(e)}")
         logger.exception("Full traceback:")
@@ -1136,26 +1145,36 @@ if __name__ == '__main__':
         monitor_thread.start()
         logger.info("Monitoring thread started")
         
-        # Run the bot in the main process
-        try:
-            run_bot()
-        except KeyboardInterrupt:
-            logger.info("Bot stopped by user")
-            if bot_instance:
-                try:
-                    bot_instance.stop()
-                    time.sleep(2)
-                    bot_instance.dispatcher.stop()
-                    if hasattr(bot_instance, 'job_queue'):
-                        bot_instance.job_queue.stop()
-                except Exception as e:
-                    logger.error(f"Error stopping bot: {str(e)}")
-            sys.exit(0)
-        except Exception as e:
-            logger.error(f"Unexpected error in main: {str(e)}")
-            logger.exception("Full traceback:")
-            if not is_restarting:
-                restart_bot()
+        # Run the bot in the main thread
+        while not shutdown_event.is_set():
+            try:
+                run_bot()
+            except Exception as e:
+                logger.error(f"Error in main loop: {str(e)}")
+                if not is_restarting:
+                    time.sleep(RESTART_DELAY)
+                    continue
+                else:
+                    break
+                    
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+        shutdown_event.set()
+        if bot_instance:
+            try:
+                bot_instance.stop()
+                time.sleep(2)
+                bot_instance.dispatcher.stop()
+                if hasattr(bot_instance, 'job_queue'):
+                    bot_instance.job_queue.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Unexpected error in main: {str(e)}")
+        logger.exception("Full traceback:")
+        if not is_restarting:
+            restart_bot()
     finally:
         if not is_restarting:
             cleanup_processes()
