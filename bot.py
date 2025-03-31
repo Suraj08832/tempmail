@@ -87,25 +87,36 @@ def acquire_lock():
     global lock_file, lock_fd
     try:
         lock_path = os.path.join(tempfile.gettempdir(), 'tempmail_bot.lock')
-        # Try to create the lock file
+        
+        # First, try to clean up any stale lock files
         if os.path.exists(lock_path):
-            # Check if the process that created the lock is still running
             try:
                 with open(lock_path, 'r') as f:
                     pid = int(f.read().strip())
-                if is_process_running(pid):
+                if not is_process_running(pid):
+                    # Process is not running, remove stale lock
+                    os.remove(lock_path)
+                else:
                     logger.error("Another instance is already running")
                     return False
-            except (ValueError, ProcessLookupError):
-                # Process is not running, we can take the lock
-                pass
+            except (ValueError, ProcessLookupError, OSError):
+                # Lock file is invalid or can't be read, remove it
+                try:
+                    os.remove(lock_path)
+                except OSError:
+                    pass
         
-        # Create or update the lock file with our PID
-        lock_fd = open(lock_path, 'w')
-        lock_fd.write(str(os.getpid()))
-        lock_fd.flush()
-        lock_file = lock_path
-        return True
+        # Create new lock file
+        try:
+            lock_fd = open(lock_path, 'w')
+            lock_fd.write(str(os.getpid()))
+            lock_fd.flush()
+            lock_file = lock_path
+            return True
+        except Exception as e:
+            logger.error(f"Error creating lock file: {str(e)}")
+            return False
+            
     except Exception as e:
         logger.error(f"Error acquiring lock: {str(e)}")
         return False
@@ -113,45 +124,61 @@ def acquire_lock():
 def release_lock():
     """Release the lock file."""
     global lock_file, lock_fd
-    if lock_fd:
-        try:
-            lock_fd.close()
-        except Exception as e:
-            logger.error(f"Error closing lock file: {str(e)}")
-    if lock_file and os.path.exists(lock_file):
-        try:
-            os.remove(lock_file)
-        except Exception as e:
-            logger.error(f"Error removing lock file: {str(e)}")
+    try:
+        if lock_fd:
+            try:
+                lock_fd.close()
+            except Exception as e:
+                logger.error(f"Error closing lock file: {str(e)}")
+        
+        if lock_file and os.path.exists(lock_file):
+            try:
+                # Only remove if it's our lock file
+                with open(lock_file, 'r') as f:
+                    pid = int(f.read().strip())
+                if pid == os.getpid():
+                    os.remove(lock_file)
+            except Exception as e:
+                logger.error(f"Error removing lock file: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error in release_lock: {str(e)}")
 
 def cleanup_processes():
     """Clean up all child processes."""
     global process_manager
-    if process_manager:
-        try:
-            # Get all child processes
-            current_process = psutil.Process()
-            children = current_process.children(recursive=True)
-            
-            # Terminate each child process
-            for child in children:
-                try:
-                    child.terminate()
-                except psutil.NoSuchProcess:
-                    pass
-            
-            # Wait for processes to terminate
-            psutil.wait_procs(children, timeout=3)
-            
-            # Force kill any remaining processes
-            for child in children:
-                try:
-                    if child.is_running():
-                        child.kill()
-                except psutil.NoSuchProcess:
-                    pass
-        except Exception as e:
-            logger.error(f"Error cleaning up processes: {str(e)}")
+    try:
+        # Get all child processes
+        current_process = psutil.Process()
+        children = current_process.children(recursive=True)
+        
+        # Terminate each child process
+        for child in children:
+            try:
+                child.terminate()
+            except psutil.NoSuchProcess:
+                pass
+        
+        # Wait for processes to terminate
+        psutil.wait_procs(children, timeout=3)
+        
+        # Force kill any remaining processes
+        for child in children:
+            try:
+                if child.is_running():
+                    child.kill()
+            except psutil.NoSuchProcess:
+                pass
+                
+        # Clean up any remaining lock files
+        lock_path = os.path.join(tempfile.gettempdir(), 'tempmail_bot.lock')
+        if os.path.exists(lock_path):
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
+                
+    except Exception as e:
+        logger.error(f"Error cleaning up processes: {str(e)}")
 
 def health_check_worker():
     """Background worker to perform health checks."""
@@ -844,6 +871,10 @@ def restart_bot():
         logger.info("Attempting to restart bot...")
         is_restarting = True
         
+        # Clean up before restart
+        cleanup_processes()
+        release_lock()
+        
         # Get the current script path
         script_path = os.path.abspath(__file__)
         
@@ -858,11 +889,17 @@ def restart_bot():
             except Exception as e:
                 logger.error(f"Error stopping bot: {str(e)}")
         
+        # Wait a bit before starting new process
+        time.sleep(2)
+        
         # Start a new process
         if platform.system() == 'Windows':
-            subprocess.Popen(['python', script_path], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+            subprocess.Popen(['python', script_path], 
+                           creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                           env=os.environ.copy())
         else:
-            subprocess.Popen(['python3', script_path])
+            subprocess.Popen(['python3', script_path],
+                           env=os.environ.copy())
             
         logger.info("Bot restart initiated")
         time.sleep(5)  # Give time for the new process to start
@@ -980,6 +1017,9 @@ def monitor_bot():
 
 if __name__ == '__main__':
     logger.info("Starting application...")
+    
+    # Clean up any existing processes and lock files
+    cleanup_processes()
     
     # Try to acquire lock
     if not acquire_lock():
