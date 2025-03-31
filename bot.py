@@ -16,6 +16,8 @@ import re
 import signal
 import socket
 import errno
+import threading
+import queue
 
 # Load environment variables
 load_dotenv()
@@ -45,6 +47,8 @@ last_response_time = datetime.now()
 last_health_check = datetime.now()
 lock_file = None
 lock_fd = None
+health_check_queue = queue.Queue()
+shutdown_event = threading.Event()
 
 # Spam keywords (can be expanded)
 SPAM_KEYWORDS = [
@@ -95,11 +99,31 @@ def release_lock():
         except Exception as e:
             logger.error(f"Error removing lock file: {str(e)}")
 
+def health_check_worker():
+    """Background worker to perform health checks."""
+    while not shutdown_event.is_set():
+        try:
+            # Check bot status
+            if bot_instance:
+                try:
+                    bot_instance.bot.get_me()
+                    health_check_queue.put(True)
+                except Exception as e:
+                    logger.error(f"Health check failed: {str(e)}")
+                    health_check_queue.put(False)
+            
+            # Sleep for 30 seconds
+            time.sleep(30)
+        except Exception as e:
+            logger.error(f"Error in health check worker: {str(e)}")
+            time.sleep(5)
+
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
     global is_shutting_down
     logger.info("Received shutdown signal. Cleaning up...")
     is_shutting_down = True
+    shutdown_event.set()
     
     # Stop the bot first
     if bot_instance:
@@ -148,19 +172,34 @@ def health_check():
     global last_response_time, last_health_check
     last_health_check = datetime.now()
     
-    # Check if bot has responded in the last 3 minutes
-    time_since_last_response = (datetime.now() - last_response_time).total_seconds()
-    is_healthy = time_since_last_response < 180  # 3 minutes = 180 seconds
-    
-    if not is_healthy:
-        logger.warning(f"Health check failed: No response for {time_since_last_response} seconds")
-    
-    return jsonify({
-        "status": "healthy" if is_healthy else "unhealthy",
-        "last_response": last_response_time.isoformat(),
-        "time_since_last_response": time_since_last_response,
-        "bot_running": bot_instance is not None and not is_shutting_down
-    })
+    try:
+        # Check if bot has responded in the last 3 minutes
+        time_since_last_response = (datetime.now() - last_response_time).total_seconds()
+        is_healthy = time_since_last_response < 180  # 3 minutes = 180 seconds
+        
+        # Check health check queue
+        try:
+            recent_health = health_check_queue.get_nowait()
+            is_healthy = is_healthy and recent_health
+        except queue.Empty:
+            pass
+        
+        if not is_healthy:
+            logger.warning(f"Health check failed: No response for {time_since_last_response} seconds")
+        
+        return jsonify({
+            "status": "healthy" if is_healthy else "unhealthy",
+            "last_response": last_response_time.isoformat(),
+            "time_since_last_response": time_since_last_response,
+            "bot_running": bot_instance is not None and not is_shutting_down,
+            "health_check_queue_size": health_check_queue.qsize()
+        })
+    except Exception as e:
+        logger.error(f"Error in health check: {str(e)}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e)
+        }), 500
 
 @app.route('/api/newmail', methods=['POST'])
 def api_newmail():
@@ -737,6 +776,11 @@ def run_bot():
     retry_count = 0
     max_retries = 5
     retry_delay = 10
+
+    # Start health check worker
+    health_thread = threading.Thread(target=health_check_worker)
+    health_thread.daemon = True
+    health_thread.start()
 
     while not is_shutting_down:
         try:
