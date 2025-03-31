@@ -20,6 +20,9 @@ import threading
 import queue
 import psutil
 import json
+import subprocess
+import platform
+import os.path
 
 # Load environment variables
 load_dotenv()
@@ -65,6 +68,11 @@ MAX_RESTART_ATTEMPTS = 3
 RESTART_DELAY = 30  # seconds
 last_restart_attempt = None
 restart_count = 0
+MAX_SHUTDOWN_ATTEMPTS = 3
+SHUTDOWN_DELAY = 5
+is_restarting = False
+last_shutdown_attempt = None
+shutdown_count = 0
 
 def is_process_running(pid):
     """Check if a process is still running."""
@@ -828,134 +836,100 @@ def run_web_server():
         logger.exception("Full traceback:")
         sys.exit(1)
 
-def run_bot():
-    """Run the Telegram bot in a separate process."""
-    global bot_instance, is_shutting_down
-    
-    # Get the token from environment variable
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        logger.error("No token found! Please set TELEGRAM_BOT_TOKEN environment variable.")
-        return
-
-    retry_count = 0
-    max_retries = 5
-    retry_delay = 10
-
-    # Start health check worker
-    health_thread = threading.Thread(target=health_check_worker)
-    health_thread.daemon = True
-    health_thread.start()
-
-    while not is_shutting_down:
-        try:
-            logger.info("Creating Updater with token...")
-            # Create the Updater and pass it your bot's token
-            updater = Updater(token=token, use_context=True)
-            bot_instance = updater
-
-            # Get the dispatcher to register handlers
-            dispatcher = updater.dispatcher
-
-            # Add command handlers
-            logger.info("Registering command handlers...")
-            dispatcher.add_handler(CommandHandler("start", start))
-            dispatcher.add_handler(CommandHandler("help", help_command))
-            dispatcher.add_handler(CommandHandler("newmail", newmail))
-            dispatcher.add_handler(CommandHandler("current", current))
-            dispatcher.add_handler(CommandHandler("delete", delete_session))
-            dispatcher.add_handler(CommandHandler("stats", stats))
-            dispatcher.add_handler(CommandHandler("forward", forward))
-            dispatcher.add_handler(CommandHandler("extend", extend_lifetime))
-            dispatcher.add_handler(CommandHandler("privacy", privacy_tips))
-            dispatcher.add_handler(CallbackQueryHandler(button_callback))
-            
-            # Add error handler
-            dispatcher.add_error_handler(error_handler)
-
-            # Start the Bot with proper configuration
-            logger.info("Starting polling...")
-            
-            # Start polling with proper parameters
-            updater.start_polling(drop_pending_updates=True)
-            logger.info("Bot started successfully!")
-            
-            # Reset retry count on successful start
-            retry_count = 0
-            
-            # Keep the bot running
-            while not is_shutting_down:
-                try:
-                    # Test bot connection every 30 seconds
-                    bot_info = updater.bot.get_me()
-                    logger.info(f"Bot is running: @{bot_info.username}")
-                    time.sleep(30)
-                except Exception as e:
-                    logger.error(f"Error in bot loop: {str(e)}")
-                    if not is_shutting_down:
-                        retry_count += 1
-                        if retry_count >= max_retries:
-                            logger.error(f"Max retries ({max_retries}) reached. Restarting bot...")
-                            break
-                        logger.info(f"Waiting {retry_delay} seconds before retrying... (Attempt {retry_count}/{max_retries})")
-                        time.sleep(retry_delay)
-                    continue
-                    
-        except Exception as e:
-            logger.error(f"Critical error in bot: {str(e)}")
-            logger.exception("Full traceback:")
-            if not is_shutting_down:
-                retry_count += 1
-                if retry_count >= max_retries:
-                    logger.error(f"Max retries ({max_retries}) reached. Exiting...")
-                    break
-                logger.info(f"Attempting to restart bot in {retry_delay} seconds... (Attempt {retry_count}/{max_retries})")
-                time.sleep(retry_delay)
-            continue
-        finally:
-            if bot_instance:
-                try:
-                    logger.info("Stopping bot...")
-                    # Stop the updater first
-                    bot_instance.stop()
-                    # Wait for any pending updates to be processed
-                    time.sleep(2)
-                    # Stop the dispatcher
-                    bot_instance.dispatcher.stop()
-                    # Stop the job queue if it exists
-                    if hasattr(bot_instance, 'job_queue'):
-                        bot_instance.job_queue.stop()
-                except Exception as e:
-                    logger.error(f"Error stopping bot: {str(e)}")
-
-@app.route('/monitor/status')
-def monitor_status():
-    """Endpoint to check bot status and health."""
-    global last_response_time, last_health_check, restart_count
+def restart_bot():
+    """Restart the bot process."""
+    global is_restarting, last_shutdown_attempt, shutdown_count
     
     try:
-        # Check if bot has responded in the last 3 minutes
-        time_since_last_response = (datetime.now() - last_response_time).total_seconds()
-        is_healthy = time_since_last_response < 180  # 3 minutes = 180 seconds
+        logger.info("Attempting to restart bot...")
+        is_restarting = True
         
-        # Check health check queue
-        try:
-            recent_health = health_check_queue.get_nowait()
-            is_healthy = is_healthy and recent_health
-        except queue.Empty:
-            pass
+        # Get the current script path
+        script_path = os.path.abspath(__file__)
         
-        return jsonify({
-            "status": "healthy" if is_healthy else "unhealthy",
-            "last_response": last_response_time.isoformat(),
-            "time_since_last_response": time_since_last_response,
-            "bot_running": bot_instance is not None and not is_shutting_down,
-            "restart_count": restart_count,
-            "last_restart": last_restart_attempt.isoformat() if last_restart_attempt else None
-        })
+        # Stop the current process
+        if bot_instance:
+            try:
+                bot_instance.stop()
+                time.sleep(2)
+                bot_instance.dispatcher.stop()
+                if hasattr(bot_instance, 'job_queue'):
+                    bot_instance.job_queue.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+        
+        # Start a new process
+        if platform.system() == 'Windows':
+            subprocess.Popen(['python', script_path], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        else:
+            subprocess.Popen(['python3', script_path])
+            
+        logger.info("Bot restart initiated")
+        time.sleep(5)  # Give time for the new process to start
+        
     except Exception as e:
-        logger.error(f"Error in monitor_status: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error restarting bot: {str(e)}")
+        is_restarting = False
+
+def handle_shutdown(signum, frame):
+    """Handle shutdown signals with retry mechanism."""
+    global last_shutdown_attempt, shutdown_count, is_shutting_down
+    
+    if is_shutting_down:
+        return
+        
+    current_time = datetime.now()
+    
+    # Check if this is a recent shutdown attempt
+    if last_shutdown_attempt and (current_time - last_shutdown_attempt).total_seconds() < SHUTDOWN_DELAY:
+        shutdown_count += 1
+        if shutdown_count >= MAX_SHUTDOWN_ATTEMPTS:
+            logger.warning("Multiple shutdown attempts detected, initiating restart...")
+            restart_bot()
+            return
+    else:
+        shutdown_count = 0
+        
+    last_shutdown_attempt = current_time
+    logger.info("Received shutdown signal. Attempting graceful shutdown...")
+    
+    try:
+        is_shutting_down = True
+        shutdown_event.set()
+        
+        if bot_instance:
+            try:
+                bot_instance.stop()
+                time.sleep(2)
+                bot_instance.dispatcher.stop()
+                if hasattr(bot_instance, 'job_queue'):
+                    bot_instance.job_queue.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+        
+        # Clean up processes
+        cleanup_processes()
+        
+        # Release the lock
+        release_lock()
+        
+        # Give time for cleanup
+        time.sleep(2)
+        
+        # If we got here without hitting max attempts, exit
+        if shutdown_count < MAX_SHUTDOWN_ATTEMPTS:
+            sys.exit(0)
+            
+    except Exception as e:
+        logger.error(f"Error during shutdown: {str(e)}")
+        if shutdown_count < MAX_SHUTDOWN_ATTEMPTS:
+            time.sleep(5)
+        else:
+            restart_bot()
+
+# Modify the signal handlers
+signal.signal(signal.SIGINT, handle_shutdown)
+signal.signal(signal.SIGTERM, handle_shutdown)
 
 def monitor_bot():
     """Background thread to monitor bot health and auto-restart if needed."""
@@ -1043,7 +1017,9 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"Unexpected error in main: {str(e)}")
             logger.exception("Full traceback:")
-            sys.exit(1)
+            if not is_restarting:
+                restart_bot()
     finally:
-        cleanup_processes()
-        release_lock() 
+        if not is_restarting:
+            cleanup_processes()
+            release_lock() 
