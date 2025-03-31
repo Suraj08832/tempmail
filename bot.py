@@ -18,6 +18,7 @@ import socket
 import errno
 import threading
 import queue
+import psutil
 
 # Load environment variables
 load_dotenv()
@@ -49,12 +50,21 @@ lock_file = None
 lock_fd = None
 health_check_queue = queue.Queue()
 shutdown_event = threading.Event()
+process_manager = None
 
 # Spam keywords (can be expanded)
 SPAM_KEYWORDS = [
     'lottery', 'winner', 'inheritance', 'urgent', 'million',
     'bank transfer', 'account suspended', 'verify account'
 ]
+
+def is_process_running(pid):
+    """Check if a process is still running."""
+    try:
+        process = psutil.Process(pid)
+        return process.is_running()
+    except psutil.NoSuchProcess:
+        return False
 
 def acquire_lock():
     """Acquire a lock to prevent multiple instances using a simple file-based approach."""
@@ -67,10 +77,9 @@ def acquire_lock():
             try:
                 with open(lock_path, 'r') as f:
                     pid = int(f.read().strip())
-                # Try to send a signal to the process
-                os.kill(pid, 0)
-                logger.error("Another instance is already running")
-                return False
+                if is_process_running(pid):
+                    logger.error("Another instance is already running")
+                    return False
             except (ValueError, ProcessLookupError):
                 # Process is not running, we can take the lock
                 pass
@@ -98,6 +107,35 @@ def release_lock():
             os.remove(lock_file)
         except Exception as e:
             logger.error(f"Error removing lock file: {str(e)}")
+
+def cleanup_processes():
+    """Clean up all child processes."""
+    global process_manager
+    if process_manager:
+        try:
+            # Get all child processes
+            current_process = psutil.Process()
+            children = current_process.children(recursive=True)
+            
+            # Terminate each child process
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            
+            # Wait for processes to terminate
+            psutil.wait_procs(children, timeout=3)
+            
+            # Force kill any remaining processes
+            for child in children:
+                try:
+                    if child.is_running():
+                        child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+        except Exception as e:
+            logger.error(f"Error cleaning up processes: {str(e)}")
 
 def health_check_worker():
     """Background worker to perform health checks."""
@@ -140,6 +178,9 @@ def signal_handler(signum, frame):
                 bot_instance.job_queue.stop()
         except Exception as e:
             logger.error(f"Error stopping bot: {str(e)}")
+    
+    # Clean up processes
+    cleanup_processes()
     
     # Release the lock
     release_lock()
@@ -753,7 +794,12 @@ def run_web_server():
         'keepalive': 5,  # Keep connections alive
         'max_requests': 1000,  # Restart workers after this many requests
         'max_requests_jitter': 50,  # Add jitter to prevent all workers restarting at once
-        'worker_tmp_dir': '/dev/shm'  # Use shared memory for better performance
+        'worker_tmp_dir': '/dev/shm',  # Use shared memory for better performance
+        'preload_app': True,  # Preload the application
+        'worker_connections': 1000,  # Maximum number of simultaneous connections
+        'backlog': 2048,  # Maximum number of pending connections
+        'max_worker_lifetime': 3600,  # Restart workers after 1 hour
+        'reload': False  # Disable auto-reload in production
     }
     
     try:
@@ -902,4 +948,5 @@ if __name__ == '__main__':
             logger.exception("Full traceback:")
             sys.exit(1)
     finally:
+        cleanup_processes()
         release_lock() 
