@@ -118,7 +118,6 @@ def acquire_lock():
         except Exception as e:
             logger.error(f"Error creating lock file: {str(e)}")
             return False
-            
     except Exception as e:
         logger.error(f"Error acquiring lock: {str(e)}")
         return False
@@ -170,7 +169,7 @@ def cleanup_processes():
                     child.kill()
             except psutil.NoSuchProcess:
                 pass
-                
+            
         # Clean up any remaining lock files
         lock_path = os.path.join(tempfile.gettempdir(), 'tempmail_bot.lock')
         if os.path.exists(lock_path):
@@ -178,7 +177,6 @@ def cleanup_processes():
                 os.remove(lock_path)
             except OSError:
                 pass
-                
     except Exception as e:
         logger.error(f"Error cleaning up processes: {str(e)}")
 
@@ -351,43 +349,70 @@ def api_check_inbox(session_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/monitor/status')
-def monitor_status():
+def health_check():
     """Health check endpoint for monitoring."""
-    global last_response_time, last_health_check, bot_instance
-    last_health_check = datetime.now()
-    
     try:
-        # Check if bot has responded in the last 3 minutes
-        time_since_last_response = (datetime.now() - last_response_time).total_seconds()
-        is_healthy = time_since_last_response < 180  # 3 minutes = 180 seconds
+        # Check if bot is running
+        if not bot_instance or not bot_instance.is_running:
+            return jsonify({
+                'status': 'unhealthy',
+                'message': 'Bot is not running',
+                'timestamp': datetime.now().isoformat()
+            }), 503
         
-        # Check if bot instance is running
-        bot_running = bot_instance is not None and not is_shutting_down
+        # Check if bot is responding to commands
+        try:
+            # Get bot info to verify connection
+            bot_info = bot_instance.bot.get_me()
+            if not bot_info:
+                return jsonify({
+                    'status': 'unhealthy',
+                    'message': 'Bot is not responding to API calls',
+                    'timestamp': datetime.now().isoformat()
+                }), 503
+        except Exception as e:
+            logger.error(f"Error checking bot API: {str(e)}")
+            return jsonify({
+                'status': 'unhealthy',
+                'message': f'Bot API error: {str(e)}',
+                'timestamp': datetime.now().isoformat()
+            }), 503
         
-        # Check if bot is responding
-        if bot_running:
-            try:
-                bot_instance.bot.get_me()
-            except Exception as e:
-                logger.error(f"Bot health check failed: {str(e)}")
-                is_healthy = False
+        # Check if dispatcher is running
+        if not bot_instance.dispatcher or not bot_instance.dispatcher.is_running:
+            return jsonify({
+                'status': 'unhealthy',
+                'message': 'Bot dispatcher is not running',
+                'timestamp': datetime.now().isoformat()
+            }), 503
         
-        if not is_healthy:
-            logger.warning(f"Health check failed: No response for {time_since_last_response} seconds")
+        # Check if job queue is running
+        if hasattr(bot_instance, 'job_queue') and not bot_instance.job_queue.is_running:
+            return jsonify({
+                'status': 'unhealthy',
+                'message': 'Bot job queue is not running',
+                'timestamp': datetime.now().isoformat()
+            }), 503
         
+        # If all checks pass, return healthy status
         return jsonify({
-            "status": "healthy" if is_healthy else "unhealthy",
-            "last_response": last_response_time.isoformat(),
-            "time_since_last_response": time_since_last_response,
-            "bot_running": bot_running,
-            "health_check_queue_size": health_check_queue.qsize()
-        })
+            'status': 'healthy',
+            'message': 'Bot is running normally',
+            'timestamp': datetime.now().isoformat(),
+            'bot_info': {
+                'username': bot_info.username,
+                'id': bot_info.id,
+                'is_bot': bot_info.is_bot
+            }
+        }), 200
+        
     except Exception as e:
         logger.error(f"Error in health check: {str(e)}")
         return jsonify({
-            "status": "unhealthy",
-            "error": str(e)
-        }), 500
+            'status': 'unhealthy',
+            'message': f'Health check error: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 503
 
 def start(update: Update, context: CallbackContext):
     """Send a message when the command /start is issued."""
@@ -955,7 +980,7 @@ def handle_shutdown(signum, frame):
     
     if is_shutting_down:
         return
-        
+
     current_time = datetime.now()
     
     # Check if this is a recent shutdown attempt
@@ -1032,27 +1057,41 @@ def monitor_bot():
                         time.sleep(MONITORING_INTERVAL)
                         continue
                     
+                    # Check if we're already in the process of restarting
+                    if is_restarting:
+                        logger.info("Bot is already restarting, skipping this attempt")
+                        time.sleep(MONITORING_INTERVAL)
+                        continue
+                    
                     # Attempt restart
                     last_restart_attempt = datetime.now()
                     restart_count += 1
                     
+                    # Stop the current bot instance gracefully
                     if bot_instance:
                         try:
-                            # Stop the bot gracefully
+                            logger.info("Stopping current bot instance...")
                             bot_instance.stop()
                             time.sleep(2)
                             bot_instance.dispatcher.stop()
                             if hasattr(bot_instance, 'job_queue'):
                                 bot_instance.job_queue.stop()
+                            logger.info("Current bot instance stopped successfully")
                         except Exception as e:
                             logger.error(f"Error stopping bot: {str(e)}")
                     
                     # Wait before restarting
                     time.sleep(RESTART_DELAY)
                     
-                    # Instead of calling run_bot directly, set a flag to restart
-                    global should_restart
-                    should_restart = True
+                    # Start a new bot instance
+                    try:
+                        logger.info("Starting new bot instance...")
+                        run_bot()
+                        logger.info("New bot instance started successfully")
+                        restart_count = 0  # Reset restart count on successful start
+                    except Exception as e:
+                        logger.error(f"Error starting new bot instance: {str(e)}")
+                        time.sleep(RESTART_DELAY)
                     
             except requests.exceptions.RequestException as e:
                 logger.error(f"Error checking bot health: {str(e)}")
@@ -1102,7 +1141,7 @@ def send_welcome_message(context: CallbackContext):
 
 def run_bot():
     """Initialize and run the Telegram bot."""
-    global bot_instance
+    global bot_instance, is_restarting
     
     try:
         # Get the bot token from environment variables
@@ -1143,6 +1182,10 @@ def run_bot():
         
         logger.info("Bot started successfully")
         
+        # Reset restart count on successful start
+        global restart_count
+        restart_count = 0
+        
         # Instead of using idle(), we'll use a loop with shutdown_event
         while not shutdown_event.is_set():
             time.sleep(1)
@@ -1163,6 +1206,8 @@ def run_bot():
             except Exception as stop_error:
                 logger.error(f"Error stopping bot: {str(stop_error)}")
         raise
+    finally:
+        is_restarting = False  # Reset restarting flag when done
 
 if __name__ == '__main__':
     logger.info("Starting application...")
