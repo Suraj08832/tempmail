@@ -664,10 +664,39 @@ def error_handler(update: Update, context: CallbackContext) -> None:
         time.sleep(5)
 
 def run_web_server():
-    """Run the Flask web server in a separate process."""
+    """Run the Flask web server in a separate process using Gunicorn."""
     port = int(os.getenv("PORT", 10000))
     logger.info(f"Starting web server on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    
+    # Use Gunicorn for production
+    import gunicorn.app.baseapp
+    from gunicorn.app.baseapp import BaseApplication
+    
+    class StandaloneApplication(BaseApplication):
+        def __init__(self, app, options=None):
+            self.options = options or {}
+            self.application = app
+            super().__init__()
+
+        def load_config(self):
+            for key, value in self.options.items():
+                self.cfg.set(key, value)
+
+        def load(self):
+            return self.application
+
+    options = {
+        'bind': f'0.0.0.0:{port}',
+        'workers': 1,  # Single worker to prevent conflicts
+        'threads': 1,  # Single thread to prevent conflicts
+        'timeout': 120,
+        'worker_class': 'sync',
+        'accesslog': '-',
+        'errorlog': '-',
+        'loglevel': 'info'
+    }
+    
+    StandaloneApplication(app, options).run()
 
 def run_bot():
     """Run the Telegram bot in a separate process."""
@@ -711,11 +740,6 @@ def run_bot():
 
             # Start the Bot with proper configuration
             logger.info("Starting polling...")
-            # Configure the bot's request timeout
-            updater.bot.request.read_timeout = 30
-            updater.bot.request.write_timeout = 30
-            updater.bot.request.connect_timeout = 30
-            updater.bot.request.pool_timeout = 30
             
             # Start polling with proper parameters
             updater.start_polling(drop_pending_updates=True)
