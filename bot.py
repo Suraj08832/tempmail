@@ -100,12 +100,28 @@ def signal_handler(signum, frame):
     global is_shutting_down
     logger.info("Received shutdown signal. Cleaning up...")
     is_shutting_down = True
+    
+    # Stop the bot first
     if bot_instance:
         try:
+            logger.info("Stopping bot...")
+            # Stop the updater first
             bot_instance.stop()
+            # Wait for any pending updates to be processed
+            time.sleep(2)
+            # Stop the dispatcher
+            bot_instance.dispatcher.stop()
+            # Stop the job queue if it exists
+            if hasattr(bot_instance, 'job_queue'):
+                bot_instance.job_queue.stop()
         except Exception as e:
             logger.error(f"Error stopping bot: {str(e)}")
+    
+    # Release the lock
     release_lock()
+    
+    # Give time for cleanup
+    time.sleep(2)
     sys.exit(0)
 
 # Register signal handlers
@@ -692,10 +708,19 @@ def run_web_server():
         'worker_class': 'sync',
         'accesslog': '-',
         'errorlog': '-',
-        'loglevel': 'info'
+        'loglevel': 'info',
+        'graceful_timeout': 30,  # Give workers time to finish
+        'keepalive': 5,  # Keep connections alive
+        'max_requests': 1000,  # Restart workers after this many requests
+        'max_requests_jitter': 50  # Add jitter to prevent all workers restarting at once
     }
     
-    StandaloneApplication(app, options).run()
+    try:
+        StandaloneApplication(app, options).run()
+    except Exception as e:
+        logger.error(f"Error in web server: {str(e)}")
+        logger.exception("Full traceback:")
+        sys.exit(1)
 
 def run_bot():
     """Run the Telegram bot in a separate process."""

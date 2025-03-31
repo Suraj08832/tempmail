@@ -1,13 +1,12 @@
 services:
   - type: web
-    name: dropmail-bot
+    name: tempmail-bot
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-        value: 8132711759:AAHUIrEfsDo0bID_4LKBr9x9qIYyUcPk3lQ
+      - key: PYTHON_VERSION
+        value: 3.11.0
       - key: PORT
         value: 10000
     healthCheckPath: /health
