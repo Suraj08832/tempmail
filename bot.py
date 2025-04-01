@@ -7,6 +7,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 from datetime import datetime, timedelta
 import pytz
 from flask import Flask
+import threading
 
 # Configure logging
 logging.basicConfig(
@@ -241,6 +242,11 @@ def help_command(update: Update, context: CallbackContext):
     )
     update.message.reply_text(help_text)
 
+def run_flask():
+    """Run Flask server in a separate thread."""
+    port = int(os.getenv('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+
 def main():
     """Start the bot."""
     # Get the bot token
@@ -276,11 +282,13 @@ def main():
     logger.info("Starting bot...")
     updater.start_polling(allowed_updates=['edited_message'])
 
-    # Get port from environment variable or use default
-    port = int(os.getenv('PORT', 10000))
-    
-    # Run Flask app
-    app.run(host='0.0.0.0', port=port)
+    # Start Flask in a separate thread
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # Run the bot until you press Ctrl-C
+    updater.idle()
 
 if __name__ == '__main__':
     main() 
