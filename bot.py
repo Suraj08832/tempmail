@@ -396,31 +396,30 @@ def api_check_inbox(session_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def check_bio_link(update: Update, context: CallbackContext):
-    """Check user's bio for links and warn if found."""
+def check_group_bio_link(update: Update, context: CallbackContext):
+    """Check group's bio for links and warn if found."""
     try:
-        user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        # Get user's profile info
-        user = context.bot.get_chat(user_id)
+        # Get chat info
+        chat = context.bot.get_chat(chat_id)
         
-        # Check if user has a bio with links
-        if user.bio and re.search(BIO_LINK_PATTERN, user.bio):
+        # Check if chat has a bio with links
+        if chat.description and re.search(BIO_LINK_PATTERN, chat.description):
             # Initialize warning count if not exists
-            if user_id not in user_bio_warnings:
-                user_bio_warnings[user_id] = 0
+            if chat_id not in user_bio_warnings:
+                user_bio_warnings[chat_id] = 0
             
             # Increment warning count
-            user_bio_warnings[user_id] += 1
+            user_bio_warnings[chat_id] += 1
             
             # Create warning message
-            warning_count = user_bio_warnings[user_id]
+            warning_count = user_bio_warnings[chat_id]
             warning_message = (
                 f"⚠️ Warning {warning_count}/{MAX_BIO_LINK_WARNINGS}\n\n"
-                f"@{user.username}, your profile bio contains links which are not allowed.\n"
-                f"Please remove the links from your bio to avoid being blocked.\n\n"
-                f"Current bio: {user.bio}"
+                f"Group {chat.title} has links in its description which are not allowed.\n"
+                f"Please remove the links from the group description to avoid being blocked.\n\n"
+                f"Current description: {chat.description}"
             )
             
             # Send warning message
@@ -430,14 +429,13 @@ def check_bio_link(update: Update, context: CallbackContext):
                 parse_mode='HTML'
             )
             
-            # If max warnings reached, delete user's messages and block
+            # If max warnings reached, delete group's messages and block
             if warning_count >= MAX_BIO_LINK_WARNINGS:
-                # Delete user's messages
+                # Delete group's messages
                 try:
-                    # Get recent messages from the user
+                    # Get recent messages from the group
                     messages = context.bot.get_chat_history(
                         chat_id=chat_id,
-                        user_id=user_id,
                         limit=10  # Delete last 10 messages
                     )
                     
@@ -454,7 +452,7 @@ def check_bio_link(update: Update, context: CallbackContext):
                 
                 # Send final warning and block message
                 block_message = (
-                    f"🚫 @{user.username} has been blocked due to multiple bio link warnings.\n"
+                    f"🚫 Group {chat.title} has been blocked due to multiple bio link warnings.\n"
                     f"Please contact an administrator to be unblocked."
                 )
                 context.bot.send_message(
@@ -463,18 +461,107 @@ def check_bio_link(update: Update, context: CallbackContext):
                     parse_mode='HTML'
                 )
                 
-                # Block the user
+                # Block the group
                 try:
                     context.bot.ban_chat_member(
                         chat_id=chat_id,
-                        user_id=user_id,
+                        user_id=chat_id,
                         until_date=datetime.now() + timedelta(days=1)  # Temporary ban
                     )
                 except Exception as e:
-                    logger.error(f"Error blocking user: {str(e)}")
+                    logger.error(f"Error blocking group: {str(e)}")
                 
                 # Reset warning count
-                user_bio_warnings[user_id] = 0
+                user_bio_warnings[chat_id] = 0
+                
+    except Exception as e:
+        logger.error(f"Error in check_group_bio_link: {str(e)}")
+
+def check_bio_link(update: Update, context: CallbackContext):
+    """Check user's and group's bio for links and warn if found."""
+    try:
+        # Check user bio if it's a private chat
+        if update.effective_chat.type in ['private', 'group']:
+            user_id = update.effective_user.id
+            chat_id = update.effective_chat.id
+            
+            # Get user's profile info
+            user = context.bot.get_chat(user_id)
+            
+            # Check if user has a bio with links
+            if user.bio and re.search(BIO_LINK_PATTERN, user.bio):
+                # Initialize warning count if not exists
+                if user_id not in user_bio_warnings:
+                    user_bio_warnings[user_id] = 0
+                
+                # Increment warning count
+                user_bio_warnings[user_id] += 1
+                
+                # Create warning message
+                warning_count = user_bio_warnings[user_id]
+                warning_message = (
+                    f"⚠️ Warning {warning_count}/{MAX_BIO_LINK_WARNINGS}\n\n"
+                    f"@{user.username}, your profile bio contains links which are not allowed.\n"
+                    f"Please remove the links from your bio to avoid being blocked.\n\n"
+                    f"Current bio: {user.bio}"
+                )
+                
+                # Send warning message
+                context.bot.send_message(
+                    chat_id=chat_id,
+                    text=warning_message,
+                    parse_mode='HTML'
+                )
+                
+                # If max warnings reached, delete user's messages and block
+                if warning_count >= MAX_BIO_LINK_WARNINGS:
+                    # Delete user's messages
+                    try:
+                        # Get recent messages from the user
+                        messages = context.bot.get_chat_history(
+                            chat_id=chat_id,
+                            user_id=user_id,
+                            limit=10  # Delete last 10 messages
+                        )
+                        
+                        for msg in messages:
+                            try:
+                                context.bot.delete_message(
+                                    chat_id=chat_id,
+                                    message_id=msg.message_id
+                                )
+                            except Exception as e:
+                                logger.error(f"Error deleting message: {str(e)}")
+                    except Exception as e:
+                        logger.error(f"Error getting chat history: {str(e)}")
+                    
+                    # Send final warning and block message
+                    block_message = (
+                        f"🚫 @{user.username} has been blocked due to multiple bio link warnings.\n"
+                        f"Please contact an administrator to be unblocked."
+                    )
+                    context.bot.send_message(
+                        chat_id=chat_id,
+                        text=block_message,
+                        parse_mode='HTML'
+                    )
+                    
+                    # Block the user
+                    try:
+                        context.bot.ban_chat_member(
+                            chat_id=chat_id,
+                            user_id=user_id,
+                            until_date=datetime.now() + timedelta(days=1)  # Temporary ban
+                        )
+                    except Exception as e:
+                        logger.error(f"Error blocking user: {str(e)}")
+                    
+                    # Reset warning count
+                    user_bio_warnings[user_id] = 0
+        
+        # Check group bio if it's a group chat
+        if update.effective_chat.type in ['group', 'supergroup']:
+            check_group_bio_link(update, context)
                 
     except Exception as e:
         logger.error(f"Error in check_bio_link: {str(e)}")
