@@ -17,6 +17,7 @@ import email
 from email import policy
 import json
 import time
+import psutil
 
 # Configure logging
 logging.basicConfig(
@@ -79,6 +80,14 @@ class CustomSMTPServer(smtpd.SMTPServer):
             logger.error(f"Error processing email: {str(e)}")
             return f"Error processing email: {str(e)}"
 
+def is_process_running(pid):
+    """Check if a process is running."""
+    try:
+        process = psutil.Process(pid)
+        return process.is_running()
+    except psutil.NoSuchProcess:
+        return False
+
 def cleanup():
     """Cleanup function to remove lock file on exit."""
     try:
@@ -94,19 +103,27 @@ def create_lock():
         if os.path.exists(LOCK_FILE):
             with open(LOCK_FILE, 'r') as f:
                 pid = int(f.read().strip())
-                try:
-                    os.kill(pid, 0)
+                if is_process_running(pid):
                     logger.error(f"Another instance is already running with PID {pid}")
                     return False
-                except OSError:
+                else:
                     # Process is not running, we can create a new lock
-                    pass
+                    os.remove(LOCK_FILE)
+        
         with open(LOCK_FILE, 'w') as f:
             f.write(str(os.getpid()))
         return True
     except Exception as e:
         logger.error(f"Error creating lock file: {str(e)}")
         return False
+
+def error_handler(update: Update, context: CallbackContext):
+    """Handle errors in the bot."""
+    logger.error(f"Update {update} caused error: {context.error}")
+    if update and update.effective_message:
+        update.effective_message.reply_text(
+            "Sorry, something went wrong. Please try again later."
+        )
 
 @app.route('/')
 def home():
@@ -439,6 +456,9 @@ def main():
 
         # Get the dispatcher to register handlers
         dp = updater.dispatcher
+
+        # Add error handler
+        dp.add_error_handler(error_handler)
 
         # Add command handlers
         dp.add_handler(CommandHandler("start", help_command))
