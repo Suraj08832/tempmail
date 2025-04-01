@@ -9,6 +9,8 @@ import pytz
 from flask import Flask
 import threading
 import sys
+import atexit
+import signal
 
 # Configure logging
 logging.basicConfig(
@@ -19,6 +21,38 @@ logger = logging.getLogger(__name__)
 
 # Create Flask app
 app = Flask(__name__)
+
+# Lock file path
+LOCK_FILE = '/tmp/telegram_bot.lock'
+
+def cleanup():
+    """Cleanup function to remove lock file on exit."""
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+            logger.info("Lock file removed")
+    except Exception as e:
+        logger.error(f"Error removing lock file: {str(e)}")
+
+def create_lock():
+    """Create a lock file to ensure only one instance runs."""
+    try:
+        if os.path.exists(LOCK_FILE):
+            with open(LOCK_FILE, 'r') as f:
+                pid = int(f.read().strip())
+                try:
+                    os.kill(pid, 0)
+                    logger.error(f"Another instance is already running with PID {pid}")
+                    return False
+                except OSError:
+                    # Process is not running, we can create a new lock
+                    pass
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        return True
+    except Exception as e:
+        logger.error(f"Error creating lock file: {str(e)}")
+        return False
 
 @app.route('/')
 def home():
@@ -255,10 +289,19 @@ def run_flask():
 def main():
     """Start the bot."""
     try:
+        # Create lock file
+        if not create_lock():
+            logger.error("Failed to create lock file. Another instance might be running.")
+            sys.exit(1)
+
+        # Register cleanup function
+        atexit.register(cleanup)
+
         # Get the bot token
         token = os.getenv('TELEGRAM_BOT_TOKEN')
         if not token:
             logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
+            cleanup()
             return
 
         # Create the Updater with specific settings
@@ -302,11 +345,22 @@ def main():
         flask_thread.daemon = True
         flask_thread.start()
 
+        # Handle shutdown signals
+        def signal_handler(signum, frame):
+            logger.info("Received shutdown signal")
+            updater.stop()
+            cleanup()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+
         # Run the bot until you press Ctrl-C
         updater.idle()
 
     except Exception as e:
         logger.error(f"Error in main: {str(e)}")
+        cleanup()
         sys.exit(1)
 
 if __name__ == '__main__':
