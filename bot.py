@@ -11,6 +11,12 @@ import threading
 import sys
 import atexit
 import signal
+import smtpd
+import asyncore
+import email
+from email import policy
+import json
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +30,54 @@ app = Flask(__name__)
 
 # Lock file path
 LOCK_FILE = '/tmp/telegram_bot.lock'
+
+# Email server settings
+EMAIL_HOST = '0.0.0.0'
+EMAIL_PORT = 25
+DOMAIN = 'temp.telegram.com'
+
+# Store emails
+emails = {}
+
+class CustomSMTPServer(smtpd.SMTPServer):
+    def __init__(self, localaddr, remoteaddr):
+        super().__init__(localaddr, remoteaddr)
+        self.emails = emails
+
+    def process_message(self, peer, mailfrom, rcpttos, data, **kwargs):
+        try:
+            # Parse email
+            msg = email.message_from_bytes(data, policy=policy.default)
+            subject = msg.get('subject', 'No Subject')
+            from_addr = mailfrom
+            to_addr = rcpttos[0]
+            date = msg.get('date', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            
+            # Extract body
+            body = ''
+            if msg.is_multipart():
+                for part in msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        body = part.get_content()
+                        break
+            else:
+                body = msg.get_content()
+
+            # Store email
+            if to_addr not in self.emails:
+                self.emails[to_addr] = []
+            self.emails[to_addr].append({
+                'subject': subject,
+                'from': from_addr,
+                'date': date,
+                'body': body
+            })
+
+            logger.info(f"Received email for {to_addr} from {from_addr}")
+            return None
+        except Exception as e:
+            logger.error(f"Error processing email: {str(e)}")
+            return f"Error processing email: {str(e)}"
 
 def cleanup():
     """Cleanup function to remove lock file on exit."""
@@ -62,10 +116,103 @@ def home():
 user_emails = {}
 user_stats = {}
 
+def run_email_server():
+    """Run SMTP server in a separate thread."""
+    try:
+        server = CustomSMTPServer((EMAIL_HOST, EMAIL_PORT), None)
+        logger.info(f"Starting SMTP server on {EMAIL_HOST}:{EMAIL_PORT}")
+        asyncore.loop()
+    except Exception as e:
+        logger.error(f"Error running SMTP server: {str(e)}")
+        sys.exit(1)
+
 def generate_email():
     """Generate a random temporary email address."""
     username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-    return f"{username}@temp.telegram.com"
+    return f"{username}@{DOMAIN}"
+
+def tempmaill(update: Update, context: CallbackContext):
+    """Generate a new temporary email address and show inbox."""
+    user_id = update.effective_user.id
+    email = generate_email()
+    user_emails[user_id] = email
+    
+    # Create refresh button
+    keyboard = [
+        [InlineKeyboardButton("🔄 Refresh Inbox", callback_data='refresh_inbox')],
+        [InlineKeyboardButton("📧 New Email", callback_data='new_email')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Show inbox
+    inbox_text = show_inbox(email)
+    
+    update.message.reply_text(
+        f"📧 Your temporary email address:\n\n"
+        f"`{email}`\n\n"
+        f"{inbox_text}",
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
+
+def show_inbox(email):
+    """Show inbox contents for an email address."""
+    if email not in emails or not emails[email]:
+        return "📥 Inbox is empty"
+    
+    inbox_text = "📥 Inbox:\n\n"
+    for i, msg in enumerate(emails[email], 1):
+        inbox_text += f"{i}. From: {msg['from']}\n"
+        inbox_text += f"   Subject: {msg['subject']}\n"
+        inbox_text += f"   Date: {msg['date']}\n\n"
+    
+    return inbox_text
+
+def button_callback(update: Update, context: CallbackContext):
+    """Handle button callbacks."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    
+    if query.data == 'refresh_inbox':
+        if user_id in user_emails:
+            email = user_emails[user_id]
+            inbox_text = show_inbox(email)
+            
+            # Create refresh button
+            keyboard = [
+                [InlineKeyboardButton("🔄 Refresh Inbox", callback_data='refresh_inbox')],
+                [InlineKeyboardButton("📧 New Email", callback_data='new_email')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            query.edit_message_text(
+                f"📧 Your temporary email address:\n\n"
+                f"`{email}`\n\n"
+                f"{inbox_text}",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            query.answer("Inbox refreshed!")
+    
+    elif query.data == 'new_email':
+        email = generate_email()
+        user_emails[user_id] = email
+        
+        # Create refresh button
+        keyboard = [
+            [InlineKeyboardButton("🔄 Refresh Inbox", callback_data='refresh_inbox')],
+            [InlineKeyboardButton("📧 New Email", callback_data='new_email')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        query.edit_message_text(
+            f"📧 Your new temporary email address:\n\n"
+            f"`{email}`\n\n"
+            f"📥 Inbox is empty",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        query.answer("New email address generated!")
 
 def handle_edited_message(update: Update, context: CallbackContext):
     """Handle edited messages in groups."""
@@ -142,31 +289,6 @@ def newmail(update: Update, context: CallbackContext):
         parse_mode='Markdown',
         reply_markup=reply_markup
     )
-
-def button_callback(update: Update, context: CallbackContext):
-    """Handle button callbacks."""
-    query = update.callback_query
-    user_id = query.from_user.id
-    
-    if query.data == 'refresh_email':
-        # Generate new email
-        email = generate_email()
-        user_emails[user_id] = email
-        user_stats[user_id]['created'] = datetime.now()
-        
-        # Create new refresh button
-        keyboard = [[InlineKeyboardButton("🔄 Refresh Email", callback_data='refresh_email')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Update the message
-        query.edit_message_text(
-            f"📧 Your new temporary email address:\n\n"
-            f"`{email}`\n\n"
-            f"This email will be valid for 24 hours.",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
-        query.answer("Email refreshed successfully!")
 
 def current_email(update: Update, context: CallbackContext):
     """Show current email address."""
@@ -265,6 +387,7 @@ def help_command(update: Update, context: CallbackContext):
         "👋 Welcome to the Bot!\n\n"
         "Temporary Email Commands:\n"
         "/newmail - Generate a new temporary email address\n"
+        "/tempmaill - Generate a new temporary email address and show inbox\n"
         "/current - Show current email address\n"
         "/delete - Delete current email session\n"
         "/stats - Show email statistics\n"
@@ -319,6 +442,7 @@ def main():
         dp.add_handler(CommandHandler("start", help_command))
         dp.add_handler(CommandHandler("help", help_command))
         dp.add_handler(CommandHandler("newmail", newmail))
+        dp.add_handler(CommandHandler("tempmaill", tempmaill))
         dp.add_handler(CommandHandler("current", current_email))
         dp.add_handler(CommandHandler("delete", delete_email))
         dp.add_handler(CommandHandler("stats", show_stats))
@@ -344,6 +468,11 @@ def main():
         flask_thread = threading.Thread(target=run_flask)
         flask_thread.daemon = True
         flask_thread.start()
+
+        # Start email server in a separate thread
+        email_thread = threading.Thread(target=run_email_server)
+        email_thread.daemon = True
+        email_thread.start()
 
         # Handle shutdown signals
         def signal_handler(signum, frame):
