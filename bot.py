@@ -285,7 +285,7 @@ def main():
         
         # Add message handlers
         dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_edited_message))
-        dp.add_handler(MessageHandler(Filters.delete, handle_deleted_message))
+        dp.add_handler(MessageHandler(Filters.status_update, handle_deleted_message))
         
         # Add callback query handler
         dp.add_handler(CallbackQueryHandler(button_callback))
