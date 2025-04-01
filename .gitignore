@@ -31,12 +31,12 @@ ENV/
 *.swp
 *.swo
 
+# Environment variables
+.env
+
 # Logs
 *.log
 logs/
-
-# Environment variables
-.env
 
 # OS
 .DS_Store

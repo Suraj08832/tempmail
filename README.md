@@ -1,85 +1,58 @@
-# Temporary Email Telegram Bot
+# Telegram Bot with Message Monitoring
 
-A Telegram bot that provides temporary email addresses using the DropMail API.
+A Telegram bot that monitors edited messages in groups and provides temporary email functionality.
 
 ## Features
 
-- Create temporary email addresses
-- View current email address
-- Delete email sessions
-- View email statistics
-- Set up email forwarding
-- Real-time email notifications
-- Auto-restart and monitoring capabilities
+- Monitors edited messages in groups
+- Sends notifications for edited messages
+- Auto-deletes notifications after 1 minute
+- Temporary email generation with refresh button
+- Email statistics tracking
 
-## Commands
+## Setup
 
-- `/start` - Start the bot and see welcome message
-- `/help` - Show help information
-- `/newmail` - Generate a new temporary email address
-- `/current` - Show current email address
-- `/delete` - Delete current email session
-- `/stats` - Show email statistics
-- `/forward` - Set up email forwarding
-
-## Deployment on Render.com
-
-1. Fork this repository to your GitHub account
-
-2. Create a new Web Service on Render.com:
-   - Connect your GitHub repository
-   - Select Python environment
-   - Set the following environment variables:
-     ```
-     TELEGRAM_BOT_TOKEN=your_bot_token_here
-     PORT=10000
-     ```
-
-3. Configure the service:
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `gunicorn bot:app --bind 0.0.0.0:$PORT --workers 1 --threads 1 --timeout 120`
-   - Health Check Path: `/monitor/status`
-   - Health Check Timeout: 180 seconds
-   - Health Check Interval: 60 seconds
-
-4. Deploy the service
-
-## Local Development
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/yourusername/tempmail.git
-   cd tempmail
-   ```
-
-2. Create and activate virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install dependencies:
+1. Clone the repository
+2. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
+3. Set up your environment variables:
+   - `TELEGRAM_BOT_TOKEN`: Your Telegram bot token from BotFather
 
-4. Create `.env` file:
-   ```
-   TELEGRAM_BOT_TOKEN=your_bot_token_here
-   ```
+## Running Locally
 
-5. Run the bot:
-   ```bash
-   python bot.py
-   ```
+```bash
+python bot.py
+```
 
-## Monitoring
+## Deploying on Render
 
-The bot includes built-in monitoring and auto-restart capabilities:
-- Health check endpoint: `/monitor/status`
-- Automatic restart on failure
-- Email alerts for critical issues
-- Performance monitoring
+1. Create a new Web Service on Render
+2. Connect your GitHub repository
+3. Set the following:
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `python bot.py`
+4. Add your `TELEGRAM_BOT_TOKEN` as an environment variable
+5. Deploy!
+
+## Commands
+
+- `/start` - Start the bot
+- `/help` - Show help message
+- `/newmail` - Generate new temporary email
+- `/current` - Show current email
+- `/delete` - Delete current email
+- `/stats` - Show email statistics
+- `/forward` - Set email forwarding
+- `/extend` - Extend email lifetime
+- `/privacy` - Get privacy tips
+
+## Group Features
+
+- Tracks edited messages
+- Sends notifications for edited messages
+- Auto-deletes notifications after 1 minute
 
 ## License
 
