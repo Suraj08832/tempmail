@@ -34,7 +34,7 @@ LOCK_FILE = '/tmp/telegram_bot.lock'
 # Email server settings
 EMAIL_HOST = '0.0.0.0'
 EMAIL_PORT = 25
-DOMAIN = 'temp.telegram.com'
+DOMAINS = ['10mail.xyz', 'emlhub.com', 'tempmail.plus', 'tempmail.space']
 
 # Store emails
 emails = {}
@@ -129,7 +129,8 @@ def run_email_server():
 def generate_email():
     """Generate a random temporary email address."""
     username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-    return f"{username}@{DOMAIN}"
+    domain = random.choice(DOMAINS)
+    return f"{username}@{domain}"
 
 def tempmaill(update: Update, context: CallbackContext):
     """Generate a new temporary email address and show inbox."""
