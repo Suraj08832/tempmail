@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import pytz
 from flask import Flask
 import threading
+import sys
 
 # Configure logging
 logging.basicConfig(
@@ -244,51 +245,69 @@ def help_command(update: Update, context: CallbackContext):
 
 def run_flask():
     """Run Flask server in a separate thread."""
-    port = int(os.getenv('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    try:
+        port = int(os.getenv('PORT', 10000))
+        app.run(host='0.0.0.0', port=port)
+    except Exception as e:
+        logger.error(f"Error running Flask server: {str(e)}")
+        sys.exit(1)
 
 def main():
     """Start the bot."""
-    # Get the bot token
-    token = os.getenv('TELEGRAM_BOT_TOKEN')
-    if not token:
-        logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
-        return
+    try:
+        # Get the bot token
+        token = os.getenv('TELEGRAM_BOT_TOKEN')
+        if not token:
+            logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
+            return
 
-    # Create the Updater
-    updater = Updater(token=token, use_context=True)
+        # Create the Updater with specific settings
+        updater = Updater(
+            token=token,
+            use_context=True,
+            workers=1,  # Limit workers to 1
+            request_kwargs={'read_timeout': 30, 'connect_timeout': 30}  # Increase timeouts
+        )
 
-    # Get the dispatcher to register handlers
-    dp = updater.dispatcher
+        # Get the dispatcher to register handlers
+        dp = updater.dispatcher
 
-    # Add command handlers
-    dp.add_handler(CommandHandler("start", help_command))
-    dp.add_handler(CommandHandler("help", help_command))
-    dp.add_handler(CommandHandler("newmail", newmail))
-    dp.add_handler(CommandHandler("current", current_email))
-    dp.add_handler(CommandHandler("delete", delete_email))
-    dp.add_handler(CommandHandler("stats", show_stats))
-    dp.add_handler(CommandHandler("forward", forward_email))
-    dp.add_handler(CommandHandler("extend", extend_email))
-    dp.add_handler(CommandHandler("privacy", privacy_tips))
-    
-    # Add edited message handler only
-    dp.add_handler(MessageHandler(~Filters.command, handle_edited_message))
-    
-    # Add callback query handler
-    dp.add_handler(CallbackQueryHandler(button_callback))
+        # Add command handlers
+        dp.add_handler(CommandHandler("start", help_command))
+        dp.add_handler(CommandHandler("help", help_command))
+        dp.add_handler(CommandHandler("newmail", newmail))
+        dp.add_handler(CommandHandler("current", current_email))
+        dp.add_handler(CommandHandler("delete", delete_email))
+        dp.add_handler(CommandHandler("stats", show_stats))
+        dp.add_handler(CommandHandler("forward", forward_email))
+        dp.add_handler(CommandHandler("extend", extend_email))
+        dp.add_handler(CommandHandler("privacy", privacy_tips))
+        
+        # Add message handlers
+        dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_edited_message))
+        dp.add_handler(MessageHandler(Filters.delete, handle_deleted_message))
+        
+        # Add callback query handler
+        dp.add_handler(CallbackQueryHandler(button_callback))
 
-    # Start the bot
-    logger.info("Starting bot...")
-    updater.start_polling(allowed_updates=['edited_message'])
+        # Start the bot
+        logger.info("Starting bot...")
+        updater.start_polling(
+            allowed_updates=['message', 'edited_message', 'callback_query'],
+            drop_pending_updates=True  # Drop any pending updates
+        )
 
-    # Start Flask in a separate thread
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
+        # Start Flask in a separate thread
+        flask_thread = threading.Thread(target=run_flask)
+        flask_thread.daemon = True
+        flask_thread.start()
 
-    # Run the bot until you press Ctrl-C
-    updater.idle()
+        # Run the bot until you press Ctrl-C
+        updater.idle()
+
+    except Exception as e:
+        logger.error(f"Error in main: {str(e)}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main() 
