@@ -6,6 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 from datetime import datetime, timedelta
 import pytz
+from flask import Flask
 
 # Configure logging
 logging.basicConfig(
@@ -13,6 +14,13 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Create Flask app
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running!"
 
 # Store user email sessions
 user_emails = {}
@@ -268,8 +276,11 @@ def main():
     logger.info("Starting bot...")
     updater.start_polling(allowed_updates=['edited_message'])
 
-    # Run the bot until you press Ctrl-C
-    updater.idle()
+    # Get port from environment variable or use default
+    port = int(os.getenv('PORT', 10000))
+    
+    # Run Flask app
+    app.run(host='0.0.0.0', port=port)
 
 if __name__ == '__main__':
     main() 
