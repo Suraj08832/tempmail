@@ -18,6 +18,8 @@ from email import policy
 import json
 import time
 import psutil
+import requests
+from aiosmtpd.controller import Controller
 
 # Configure logging
 logging.basicConfig(
@@ -40,18 +42,20 @@ DOMAINS = ['10mail.xyz', 'emlhub.com', 'tempmail.plus', 'tempmail.space']
 # Store emails
 emails = {}
 
-class CustomSMTPServer(smtpd.SMTPServer):
-    def __init__(self, localaddr, remoteaddr):
-        super().__init__(localaddr, remoteaddr)
-        self.emails = emails
+class CustomHandler:
+    async def handle_RCPT(self, server, session, envelope, address, rcpt_options):
+        if not address.endswith(tuple(DOMAINS)):
+            return '550 not relaying to that domain'
+        envelope.rcpt_tos.append(address)
+        return '250 OK'
 
-    def process_message(self, peer, mailfrom, rcpttos, data, **kwargs):
+    async def handle_DATA(self, server, session, envelope):
         try:
             # Parse email
-            msg = email.message_from_bytes(data, policy=policy.default)
+            msg = email.message_from_bytes(envelope.content, policy=policy.default)
             subject = msg.get('subject', 'No Subject')
-            from_addr = mailfrom
-            to_addr = rcpttos[0]
+            from_addr = envelope.mail_from
+            to_addr = envelope.rcpt_tos[0]
             date = msg.get('date', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             
             # Extract body
@@ -65,9 +69,9 @@ class CustomSMTPServer(smtpd.SMTPServer):
                 body = msg.get_content()
 
             # Store email
-            if to_addr not in self.emails:
-                self.emails[to_addr] = []
-            self.emails[to_addr].append({
+            if to_addr not in emails:
+                emails[to_addr] = []
+            emails[to_addr].append({
                 'subject': subject,
                 'from': from_addr,
                 'date': date,
@@ -75,10 +79,22 @@ class CustomSMTPServer(smtpd.SMTPServer):
             })
 
             logger.info(f"Received email for {to_addr} from {from_addr}")
-            return None
+            return '250 Message accepted for delivery'
         except Exception as e:
             logger.error(f"Error processing email: {str(e)}")
-            return f"Error processing email: {str(e)}"
+            return f'500 Error processing email: {str(e)}'
+
+def run_email_server():
+    """Run SMTP server in a separate thread."""
+    try:
+        controller = Controller(CustomHandler(), hostname=EMAIL_HOST, port=EMAIL_PORT)
+        controller.start()
+        logger.info(f"Starting SMTP server on {EMAIL_HOST}:{EMAIL_PORT}")
+        while True:
+            time.sleep(1)
+    except Exception as e:
+        logger.error(f"Error running SMTP server: {str(e)}")
+        sys.exit(1)
 
 def is_process_running(pid):
     """Check if a process is running."""
@@ -132,16 +148,6 @@ def home():
 # Store user email sessions
 user_emails = {}
 user_stats = {}
-
-def run_email_server():
-    """Run SMTP server in a separate thread."""
-    try:
-        server = CustomSMTPServer((EMAIL_HOST, EMAIL_PORT), None)
-        logger.info(f"Starting SMTP server on {EMAIL_HOST}:{EMAIL_PORT}")
-        asyncore.loop()
-    except Exception as e:
-        logger.error(f"Error running SMTP server: {str(e)}")
-        sys.exit(1)
 
 def generate_email():
     """Generate a random temporary email address."""
