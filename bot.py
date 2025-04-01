@@ -38,8 +38,10 @@ EMAIL_HOST = '0.0.0.0'
 EMAIL_PORT = 25
 DOMAINS = ['10mail.xyz', 'emlhub.com', 'tempmail.plus', 'tempmail.space']
 
-# Store emails
+# Store emails and user sessions
 emails = {}
+user_emails = {}
+user_stats = {}
 
 class CustomHandler:
     async def handle_RCPT(self, server, session, envelope, address, rcpt_options):
@@ -76,6 +78,30 @@ class CustomHandler:
                 'date': date,
                 'body': body
             })
+
+            # Find user by email and send notification
+            for user_id, email_addr in user_emails.items():
+                if email_addr == to_addr:
+                    try:
+                        # Get bot instance from the application context
+                        bot = Updater.bot
+                        if bot:
+                            # Create notification message
+                            notification = (
+                                f"📧 New email received!\n\n"
+                                f"From: {from_addr}\n"
+                                f"Subject: {subject}\n"
+                                f"Date: {date}\n"
+                                f"Body: {body[:200]}..."  # First 200 chars
+                            )
+                            # Send notification to user
+                            bot.send_message(
+                                chat_id=user_id,
+                                text=notification,
+                                parse_mode='HTML'
+                            )
+                    except Exception as e:
+                        logger.error(f"Error sending notification to user {user_id}: {str(e)}")
 
             logger.info(f"Received email for {to_addr} from {from_addr}")
             return '250 Message accepted for delivery'
@@ -144,15 +170,30 @@ def error_handler(update: Update, context: CallbackContext):
 def home():
     return "Bot is running!"
 
-# Store user email sessions
-user_emails = {}
-user_stats = {}
-
 def generate_email():
     """Generate a random temporary email address."""
     username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
     domain = random.choice(DOMAINS)
     return f"{username}@{domain}"
+
+def newmail(update: Update, context: CallbackContext):
+    """Generate a new temporary email address."""
+    user_id = update.effective_user.id
+    email = generate_email()
+    user_emails[user_id] = email
+    user_stats[user_id] = {'created': datetime.now(), 'emails_received': 0}
+    
+    # Create refresh button
+    keyboard = [[InlineKeyboardButton("🔄 Refresh Email", callback_data='refresh_email')]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    update.message.reply_text(
+        f"📧 Your new temporary email address:\n\n"
+        f"`{email}`\n\n"
+        f"This email will be valid for 24 hours.",
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
 
 def tempmaill(update: Update, context: CallbackContext):
     """Generate a new temporary email address and show inbox."""
@@ -294,25 +335,6 @@ def handle_deleted_message(update: Update, context: CallbackContext):
             )
     except Exception as e:
         logger.error(f"Error handling deleted message: {str(e)}")
-
-def newmail(update: Update, context: CallbackContext):
-    """Generate a new temporary email address."""
-    user_id = update.effective_user.id
-    email = generate_email()
-    user_emails[user_id] = email
-    user_stats[user_id] = {'created': datetime.now(), 'emails_received': 0}
-    
-    # Create refresh button
-    keyboard = [[InlineKeyboardButton("🔄 Refresh Email", callback_data='refresh_email')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    update.message.reply_text(
-        f"📧 Your new temporary email address:\n\n"
-        f"`{email}`\n\n"
-        f"This email will be valid for 24 hours.",
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
 
 def current_email(update: Update, context: CallbackContext):
     """Show current email address."""
