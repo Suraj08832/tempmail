@@ -19,6 +19,7 @@ import psutil
 import requests
 from aiosmtpd.controller import Controller
 import asyncio
+import socket
 
 # Configure logging
 logging.basicConfig(
@@ -119,9 +120,16 @@ class CustomHandler:
 async def run_email_server():
     """Run SMTP server in a separate thread."""
     try:
+        # Create a socket to check if port is available
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((EMAIL_HOST, EMAIL_PORT))
+        sock.close()
+        
         controller = Controller(CustomHandler(), hostname=EMAIL_HOST, port=EMAIL_PORT)
         controller.start()
         logger.info(f"Starting SMTP server on {EMAIL_HOST}:{EMAIL_PORT}")
+        
+        # Keep the server running
         while True:
             await asyncio.sleep(1)
     except Exception as e:
