@@ -137,9 +137,9 @@ def tempmaill(update: Update, context: CallbackContext):
     email = generate_email()
     user_emails[user_id] = email
     
-    # Create refresh button
+    # Create refresh and new email buttons
     keyboard = [
-        [InlineKeyboardButton("🔄 Refresh Inbox", callback_data='refresh_inbox')],
+        [InlineKeyboardButton("🔄 Refresh Messages", callback_data='refresh_messages')],
         [InlineKeyboardButton("📧 New Email", callback_data='new_email')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -164,7 +164,8 @@ def show_inbox(email):
     for i, msg in enumerate(emails[email], 1):
         inbox_text += f"{i}. From: {msg['from']}\n"
         inbox_text += f"   Subject: {msg['subject']}\n"
-        inbox_text += f"   Date: {msg['date']}\n\n"
+        inbox_text += f"   Date: {msg['date']}\n"
+        inbox_text += f"   Body: {msg['body'][:200]}...\n\n"  # Show first 200 chars of body
     
     return inbox_text
 
@@ -173,14 +174,14 @@ def button_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     user_id = query.from_user.id
     
-    if query.data == 'refresh_inbox':
+    if query.data == 'refresh_messages':
         if user_id in user_emails:
             email = user_emails[user_id]
             inbox_text = show_inbox(email)
             
-            # Create refresh button
+            # Create refresh and new email buttons
             keyboard = [
-                [InlineKeyboardButton("🔄 Refresh Inbox", callback_data='refresh_inbox')],
+                [InlineKeyboardButton("🔄 Refresh Messages", callback_data='refresh_messages')],
                 [InlineKeyboardButton("📧 New Email", callback_data='new_email')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -192,15 +193,15 @@ def button_callback(update: Update, context: CallbackContext):
                 parse_mode='Markdown',
                 reply_markup=reply_markup
             )
-            query.answer("Inbox refreshed!")
+            query.answer("Messages refreshed!")
     
     elif query.data == 'new_email':
         email = generate_email()
         user_emails[user_id] = email
         
-        # Create refresh button
+        # Create refresh and new email buttons
         keyboard = [
-            [InlineKeyboardButton("🔄 Refresh Inbox", callback_data='refresh_inbox')],
+            [InlineKeyboardButton("🔄 Refresh Messages", callback_data='refresh_messages')],
             [InlineKeyboardButton("📧 New Email", callback_data='new_email')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
