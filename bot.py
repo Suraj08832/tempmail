@@ -2,7 +2,7 @@ import os
 import logging
 import random
 import string
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 from datetime import datetime, timedelta
 import pytz
@@ -42,6 +42,7 @@ DOMAINS = ['10mail.xyz', 'emlhub.com', 'tempmail.plus', 'tempmail.space']
 emails = {}
 user_emails = {}
 user_stats = {}
+message_tracking = {}  # Track bot messages for editing/deleting
 
 class CustomHandler:
     async def handle_RCPT(self, server, session, envelope, address, rcpt_options):
@@ -95,11 +96,17 @@ class CustomHandler:
                                 f"Body: {body[:200]}..."  # First 200 chars
                             )
                             # Send notification to user
-                            bot.send_message(
+                            sent_msg = bot.send_message(
                                 chat_id=user_id,
                                 text=notification,
                                 parse_mode='HTML'
                             )
+                            # Track the message
+                            message_tracking[sent_msg.message_id] = {
+                                'chat_id': user_id,
+                                'type': 'email_notification',
+                                'email': to_addr
+                            }
                     except Exception as e:
                         logger.error(f"Error sending notification to user {user_id}: {str(e)}")
 
@@ -187,13 +194,20 @@ def newmail(update: Update, context: CallbackContext):
     keyboard = [[InlineKeyboardButton("🔄 Refresh Email", callback_data='refresh_email')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    update.message.reply_text(
+    sent_msg = update.message.reply_text(
         f"📧 Your new temporary email address:\n\n"
         f"`{email}`\n\n"
         f"This email will be valid for 24 hours.",
         parse_mode='Markdown',
         reply_markup=reply_markup
     )
+    
+    # Track the message
+    message_tracking[sent_msg.message_id] = {
+        'chat_id': update.effective_chat.id,
+        'type': 'email_generation',
+        'email': email
+    }
 
 def tempmaill(update: Update, context: CallbackContext):
     """Generate a new temporary email address and show inbox."""
@@ -211,13 +225,20 @@ def tempmaill(update: Update, context: CallbackContext):
     # Show inbox
     inbox_text = show_inbox(email)
     
-    update.message.reply_text(
+    sent_msg = update.message.reply_text(
         f"📧 Your temporary email address:\n\n"
         f"`{email}`\n\n"
         f"{inbox_text}",
         parse_mode='Markdown',
         reply_markup=reply_markup
     )
+    
+    # Track the message
+    message_tracking[sent_msg.message_id] = {
+        'chat_id': update.effective_chat.id,
+        'type': 'inbox_view',
+        'email': email
+    }
 
 def show_inbox(email):
     """Show inbox contents for an email address."""
@@ -303,6 +324,13 @@ def handle_edited_message(update: Update, context: CallbackContext):
                 parse_mode='HTML'
             )
             
+            # Track the message
+            message_tracking[sent_msg.message_id] = {
+                'chat_id': edited_msg.chat_id,
+                'type': 'edit_notification',
+                'original_message_id': edited_msg.message_id
+            }
+            
             # Schedule deletion after 1 minute
             context.job_queue.run_once(
                 lambda context: context.bot.delete_message(
@@ -327,12 +355,19 @@ def handle_deleted_message(update: Update, context: CallbackContext):
                 f"Content: {deleted_msg.text}"
             )
             
-            # Send notification (without auto-deletion)
-            context.bot.send_message(
+            # Send notification and store the message object
+            sent_msg = context.bot.send_message(
                 chat_id=deleted_msg.chat_id,
                 text=notification,
                 parse_mode='HTML'
             )
+            
+            # Track the message
+            message_tracking[sent_msg.message_id] = {
+                'chat_id': deleted_msg.chat_id,
+                'type': 'delete_notification',
+                'original_message_id': deleted_msg.message_id
+            }
     except Exception as e:
         logger.error(f"Error handling deleted message: {str(e)}")
 
@@ -340,16 +375,29 @@ def current_email(update: Update, context: CallbackContext):
     """Show current email address."""
     user_id = update.effective_user.id
     if user_id in user_emails:
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             f"📧 Your current temporary email address:\n\n"
             f"`{user_emails[user_id]}`",
             parse_mode='Markdown'
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'current_email',
+            'email': user_emails[user_id]
+        }
     else:
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             "❌ You don't have an active temporary email address.\n"
             "Use /newmail to create one."
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'no_email'
+        }
 
 def delete_email(update: Update, context: CallbackContext):
     """Delete current email session."""
@@ -357,14 +405,27 @@ def delete_email(update: Update, context: CallbackContext):
     if user_id in user_emails:
         email = user_emails.pop(user_id)
         user_stats.pop(user_id, None)
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             f"🗑️ Your temporary email address has been deleted:\n\n"
             f"`{email}`"
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'email_deletion',
+            'email': email
+        }
     else:
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             "❌ You don't have an active temporary email address."
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'no_email'
+        }
 
 def show_stats(update: Update, context: CallbackContext):
     """Show email statistics."""
@@ -372,46 +433,85 @@ def show_stats(update: Update, context: CallbackContext):
     if user_id in user_stats:
         stats = user_stats[user_id]
         created_time = stats['created'].strftime('%Y-%m-%d %H:%M:%S')
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             f"📊 Email Statistics:\n\n"
             f"Created: {created_time}\n"
             f"Emails received: {stats['emails_received']}\n"
             f"Current address: `{user_emails[user_id]}`",
             parse_mode='Markdown'
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'stats',
+            'email': user_emails[user_id]
+        }
     else:
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             "❌ No statistics available.\n"
             "Use /newmail to create a temporary email address."
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'no_stats'
+        }
 
 def forward_email(update: Update, context: CallbackContext):
     """Set email forwarding."""
     user_id = update.effective_user.id
     if user_id in user_emails:
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             "📧 Email forwarding is enabled by default.\n"
             "All emails sent to your temporary address will be forwarded to you."
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'forwarding_info',
+            'email': user_emails[user_id]
+        }
     else:
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             "❌ You don't have an active temporary email address.\n"
             "Use /newmail to create one."
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'no_email'
+        }
 
 def extend_email(update: Update, context: CallbackContext):
     """Extend email lifetime."""
     user_id = update.effective_user.id
     if user_id in user_stats:
         user_stats[user_id]['created'] = datetime.now()
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             "⏰ Your temporary email address lifetime has been extended by 24 hours."
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'extension',
+            'email': user_emails[user_id]
+        }
     else:
-        update.message.reply_text(
+        sent_msg = update.message.reply_text(
             "❌ You don't have an active temporary email address.\n"
             "Use /newmail to create one."
         )
+        
+        # Track the message
+        message_tracking[sent_msg.message_id] = {
+            'chat_id': update.effective_chat.id,
+            'type': 'no_email'
+        }
 
 def privacy_tips(update: Update, context: CallbackContext):
     """Get privacy tips."""
@@ -425,7 +525,13 @@ def privacy_tips(update: Update, context: CallbackContext):
         "6. Monitor your email activity regularly\n"
         "7. Delete your temporary email when done"
     )
-    update.message.reply_text(tips)
+    sent_msg = update.message.reply_text(tips)
+    
+    # Track the message
+    message_tracking[sent_msg.message_id] = {
+        'chat_id': update.effective_chat.id,
+        'type': 'privacy_tips'
+    }
 
 def help_command(update: Update, context: CallbackContext):
     """Send a message when the command /help is issued."""
@@ -444,7 +550,13 @@ def help_command(update: Update, context: CallbackContext):
         "- Tracks edited messages\n"
         "- Tracks deleted messages"
     )
-    update.message.reply_text(help_text)
+    sent_msg = update.message.reply_text(help_text)
+    
+    # Track the message
+    message_tracking[sent_msg.message_id] = {
+        'chat_id': update.effective_chat.id,
+        'type': 'help'
+    }
 
 def run_flask():
     """Run Flask server in a separate thread."""
