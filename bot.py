@@ -11,8 +11,6 @@ import threading
 import sys
 import atexit
 import signal
-import smtpd
-import asyncore
 import email
 from email import policy
 import json
@@ -20,6 +18,7 @@ import time
 import psutil
 import requests
 from aiosmtpd.controller import Controller
+import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -84,14 +83,14 @@ class CustomHandler:
             logger.error(f"Error processing email: {str(e)}")
             return f'500 Error processing email: {str(e)}'
 
-def run_email_server():
+async def run_email_server():
     """Run SMTP server in a separate thread."""
     try:
         controller = Controller(CustomHandler(), hostname=EMAIL_HOST, port=EMAIL_PORT)
         controller.start()
         logger.info(f"Starting SMTP server on {EMAIL_HOST}:{EMAIL_PORT}")
         while True:
-            time.sleep(1)
+            await asyncio.sleep(1)
     except Exception as e:
         logger.error(f"Error running SMTP server: {str(e)}")
         sys.exit(1)
@@ -498,7 +497,7 @@ def main():
         flask_thread.start()
 
         # Start email server in a separate thread
-        email_thread = threading.Thread(target=run_email_server)
+        email_thread = threading.Thread(target=lambda: asyncio.run(run_email_server()))
         email_thread.daemon = True
         email_thread.start()
 
